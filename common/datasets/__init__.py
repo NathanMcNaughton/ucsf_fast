@@ -3,7 +3,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from PIL import Image
 import numpy as np
-from torchvision.transforms import transforms
+from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 
 class TransformingTensorDataset(Dataset):
@@ -40,7 +41,7 @@ class FASTDataset(Dataset):
     Attributes:
         data_dir (str): Directory with image files.
         resize (bool): Flag to resize images to a standard size if they don't match.
-        transform (transforms.]): Transformations to be applied to the images.
+        transform (torchvision.transforms): Transformations to be applied to the images.
     """
     DEFAULT_IMAGE_SIZE = (960, 720)
     
@@ -66,12 +67,22 @@ class FASTDataset(Dataset):
             label = Image.open(label_path).convert('L')
         except IOError as e:
             raise RuntimeError(f'Error opening image: {e}')
-        
+
+        # Check for images that are not default size
         if self.resize and image.size != self.DEFAULT_IMAGE_SIZE:
-            resize_transform = transforms.Resize((self.DEFAULT_IMAGE_SIZE[1], 
-                                                  self.DEFAULT_IMAGE_SIZE[0]))
-            image = resize_transform(image)
-            label = resize_transform(label)
+
+            # For images, use bilinear interpolation
+            img_resize_transform = transforms.Resize(
+                size=(self.DEFAULT_IMAGE_SIZE[1], self.DEFAULT_IMAGE_SIZE[0]),
+                interpolation=InterpolationMode.BILINEAR
+            )
+            # For labels, use nearest neighbor interpolation to avoid introducing non-binary values
+            label_resize_transform = transforms.Resize(
+                size=(self.DEFAULT_IMAGE_SIZE[1], self.DEFAULT_IMAGE_SIZE[0]),
+                interpolation=InterpolationMode.NEAREST
+            )
+            image = img_resize_transform(image)
+            label = label_resize_transform(label)
         
         image = self.transform(image)
         label = self.transform(label)
