@@ -32,7 +32,7 @@ class FASTDataset(Dataset):
     """
     This dataset is designed to work with the pilot labeling done in February 2024.
     The images and the segmentation labels are saved as PNG images in the same 
-    directory. There are around 350 such pairs.
+    directory. There are 384 such pairs.
     
     This class defaults to resizing the images when they have irregular dimensions.
     If the option is turned off and this class is used with torch.utils.data.DataLoader,
@@ -41,13 +41,13 @@ class FASTDataset(Dataset):
     Attributes:
         data_dir (str): Directory with image files.
         resize (bool): Flag to resize images to a standard size if they don't match.
-        transform (torchvision.transforms): Transformations to be applied to the images.
+        transform (torchvision.transforms): Transformations to be applied to the images and the masks.
     """
     DEFAULT_IMAGE_SIZE = (960, 720)
     
     def __init__(self, data_dir: str, resize: bool = True, transform = None):
         self.data_dir = data_dir
-        self.transform = transform if transform is not None else transforms.ToTensor()
+        self.transform = transform
         self.resize = resize
         # List all files in directory and filter out segmentation label images
         self.image_files = [f for f in os.listdir(data_dir) if not '_Morison' in f and f.endswith('.png')]
@@ -83,9 +83,23 @@ class FASTDataset(Dataset):
             )
             image = img_resize_transform(image)
             label = label_resize_transform(label)
-        
-        image = self.transform(image)
-        label = self.transform(label)
+
+        # Define transformations for the images. Namely, convert to tensor and normalize.
+        img_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+        # Define transformations for the labels. Namely, convert to tensor.
+        label_transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+
+        image = img_transform(image)
+        label = label_transform(label)
+
+        if self.transform:
+            image = self.transform(image)
+            label = self.transform(label)
         
         return image, label
     
