@@ -23,6 +23,11 @@ class ToyUNet(nn.Module):
         self.dec = ConvBlock(32, 16)
         self.outc = nn.Conv2d(16, n_classes, kernel_size=1)
 
+        # Initialize the output layer with a bias that will make the initial predictions close to the class distribution
+        p = 0.0158
+        initial_bias_logit = torch.log(torch.tensor(p) / (1 - torch.tensor(p)))
+        self.outc.bias.data.fill_(initial_bias_logit.item())
+
     def forward(self, x):
         # Encoder
         x1 = self.inc(x)
