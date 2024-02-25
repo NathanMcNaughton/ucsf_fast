@@ -15,7 +15,7 @@ from common.datasets import FASTDataset
 from common.models.small.unet_toy import ToyUNet
 
 
-def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred=None, alpha=0.4, save_path=None):
+def visualize_segmentation_overlay_old(image_tensor, mask_tensor_true, mask_tensor_pred=None, alpha=0.4, save_path=None):
     """
     Visualizes the predicted and true segmentation mask overlays on the original image.
 
@@ -45,14 +45,17 @@ def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_p
 
     if mask_tensor_pred is not None:
         mask_pred = mask_tensor_pred.detach().squeeze().cpu().numpy()
-        mask_pred_rescaled = (mask_pred - mask_pred.min()) / (mask_pred.max() - mask_pred.min())
+        # mask_pred_rescaled = (mask_pred - mask_pred.min()) / (mask_pred.max() - mask_pred.min())
+        mask_pred_rescaled = mask_pred
 
         mask_overlay_pred = np.zeros_like(image_rgb)
         #print(f'RGB mask overlay dim: {mask_overlay_pred.shape}')
         #print(f'Predicted mask dim: {mask_pred_rescaled.shape}')
         #print(f'Predicted mask range: {mask_pred_rescaled.min()} to {mask_pred_rescaled.max()}')
-        # mask_overlay_pred[mask_pred > 0.5] = [0, 1, 0]
+        #mask_overlay_pred[mask_pred > 0.5] = [0, 1, 0]
+        #mask_pred_rescaled[mask_pred_rescaled > 0.5] = [0, 1, 0]
         mask_overlay_pred[:, :, 0] = mask_pred_rescaled
+        overlayed_image_pred = (1 - alpha) * image_rgb + alpha * mask_overlay_pred
         overlayed_image_pred = np.where(mask_overlay_pred, (1-alpha)*image_rgb + alpha*mask_overlay_pred, image_rgb)
 
     # Display the overlayed image
@@ -80,6 +83,66 @@ def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_p
 
     plt.show()
     plt.close()
+
+
+def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred, alpha=1.0, save_path=None):
+    """
+    Visualizes the segmentation overlay on top of the original image.
+
+    Parameters:
+        image_tensor (torch.Tensor): The original image tensor of shape [1, H, W].
+        mask_tensor_true (torch.Tensor): The true mask tensor of shape [1, H, W], with 1s for the object.
+        mask_tensor_pred (torch.Tensor, optional): The predicted mask tensor of shape [1, H, W], with 1s for the object.
+        alpha (float): Opacity level of the mask overlay. Default is 0.3.
+        save_path (str, optional): Path to save the visualization. If None, the image is not saved.
+    """
+    mask_tensor_pred = torch.sigmoid(mask_tensor_pred)
+
+    # Ensure the orignal image and the masks are numpy arrays
+    image = image_tensor.detach().squeeze().cpu().numpy()
+    mask_true = mask_tensor_true.detach().squeeze().cpu().numpy() * alpha
+    mask_pred = mask_tensor_pred.detach().squeeze().cpu().numpy() * alpha
+
+    # Normalize the image for display
+    image_normalized = (image - image.min()) / (image.max() - image.min())
+
+    # Rescale original image pixels into the interval [0, 1 - p]
+    image_rescaled_true = image_normalized * (1 - mask_true)
+    image_rescaled_pred = image_normalized * (1 - mask_pred)
+
+    # Create an RGB version of the image
+    image_rgb_true = np.stack([image_rescaled_true]*3, axis=-1)
+    image_rgb_pred = np.stack([image_rescaled_pred] * 3, axis=-1)
+
+    # Add the mask values to the red channel
+    image_rgb_true[..., 0] += mask_true
+    image_rgb_pred[..., 0] +=  mask_pred
+
+    # Plotting
+    fig, axes = plt.subplots(1, 3, figsize=(10, 10))
+
+    # Original image
+    axes[0].imshow(image_normalized, cmap='gray', interpolation='nearest')
+    axes[0].set_title('Original Image')
+    axes[0].axis('off')
+
+    # True mask overlay
+    axes[1].imshow(image_rgb_true, interpolation='nearest')
+    axes[1].set_title('True Segmentation Overlay')
+    axes[1].axis('off')
+
+    # Predicted mask overlay
+    axes[2].imshow(image_rgb_pred, interpolation='nearest')
+    axes[2].set_title('Predicted Segmentation Overlay')
+    axes[2].axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+
 
 
 def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
@@ -125,6 +188,21 @@ def test_all(loader, model, loss_fn):
 
 
 def main():
+    learning_rate = 1e-3
+    loss_fn = 'BCEWithLogitsLoss'
+    loss_weight = 1  # 63.29 = 1/0.0158
+    optimizer = 'SGD'
+
+    n_total = 384
+    n_train = 2
+    n_test = n_total - n_train
+
+    batch_size = 10
+    n_epochs = 100
+    n_batches = int((n_train / batch_size) * n_epochs)
+    k = 10  # Visualize the model predictions on the fixed set every k epochs
+    print(f'Total number of train batches: {n_batches}')
+
     if torch.cuda.is_available():
         print(f'CUDA available. Using GPU.')
     else:
@@ -144,52 +222,45 @@ def main():
     proj_name = '02_21_2024_ucsf_fast'
     wandb.init(project=proj_name, entity=config['wandb_entity'])
 
-    wandb_run_name = wandb.run.name
+    wandb.config = {
+        "learning_rate": 1e-3,
+        "batch_size": batch_size,
+        "n_epochs": n_epochs,
+        "n_train": n_train,
+        "loss_fn": "BCEWithLogitsLoss",
+        "loss_weight": "None",
+        "optimizer": "SGD"
+    }
+
     project_dir = os.path.join(logging_dir, proj_name)
+    if not os.path.exists(project_dir): os.makedirs(project_dir)
 
-    if not os.path.exists(project_dir):
-        os.makedirs(project_dir)
-
+    wandb_run_name = wandb.run.name
     run_dir = os.path.join(project_dir, wandb_run_name)
-
-    if not os.path.exists(run_dir):
-        os.makedirs(run_dir)
+    if not os.path.exists(run_dir): os.makedirs(run_dir)
 
     fig_dir = os.path.join(run_dir, 'segmentation_overlays')
-
-    if not os.path.exists(fig_dir):
-        os.makedirs(fig_dir)
+    if not os.path.exists(fig_dir): os.makedirs(fig_dir)
 
     # Create the datasets and dataloaders
     img_dataset = FASTDataset(data_dir)
 
-    n_total = len(img_dataset)
-    n_train = int(0.8 * n_total)
-    n_test = n_total - n_train
-
-    batch_size = 10
-    # batches_per_epoch = n_train // batch_size
-    n_epochs = 5
-    n_batches = int((n_train / batch_size) * n_epochs)
-    k = 30  # Evaluate the model on the test set every k batches
-    print(f'Total number of train batches: {n_batches}')
-
     dataset_train, dataset_test = torch.utils.data.random_split(img_dataset, [n_train, n_test])
 
-    loader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=2)
+    loader_train = DataLoader(dataset_train, batch_size=min(n_train, batch_size), shuffle=True, num_workers=2)
     loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=2)
 
     # Select a fixed set of exactly three test images and masks for visualization during training
-    fixed_images, fixed_masks = next(iter(loader_test))
-    fixed_images, fixed_masks = fixed_images[:3].cuda(), fixed_masks[:3].cuda()
+    fixed_images, fixed_masks = next(iter(loader_train))
+    fixed_images, fixed_masks = fixed_images[:2].cuda(), fixed_masks[:2].cuda()
 
     model = ToyUNet(n_channels=1, n_classes=1)
     model.cuda()
     trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
     print(f"Total number of trainable parameters: {trainable_params}")
 
-    criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.SGD(model.parameters(), lr=1e-3)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_weight))
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
     # scheduler =
 
     print('Training...')
@@ -214,14 +285,14 @@ def main():
         print(f'[Epoch {epoch+1} of {n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
         wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
 
-        visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
+        if (epoch+1) % k == 0:
+            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
 
     print('Saving model...')
 
     print('Model saved. Exiting...')
 
     wandb.finish()
-
 
 
 if __name__ == '__main__':
