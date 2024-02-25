@@ -15,76 +15,6 @@ from common.datasets import FASTDataset
 from common.models.small.unet_toy import ToyUNet
 
 
-def visualize_segmentation_overlay_old(image_tensor, mask_tensor_true, mask_tensor_pred=None, alpha=0.4, save_path=None):
-    """
-    Visualizes the predicted and true segmentation mask overlays on the original image.
-
-    Parameters:
-        image_tensor (torch.Tensor): The original image tensor of shape [1, H, W].
-        mask_tensor_true (torch.Tensor): The true mask tensor of shape [1, H, W], with 1s for the object.
-        mask_tensor_pred (torch.Tensor, optional): The predicted mask tensor of shape [1, H, W], with 1s for the object.
-        alpha (float): Opacity level of the mask overlay. Default is 0.3.
-        save_path (str, optional): Path to save the visualization. If None, the image is not saved.
-    """
-    # Convert the image and mask tensors to numpy arrays
-    image = image_tensor.detach().squeeze().cpu().numpy()  # Remove channel dimension and convert to numpy
-    mask_true = mask_tensor_true.detach().squeeze().cpu().numpy()
-
-    # Normalize the image for display
-    image_normalized = (image - image.min()) / (image.max() - image.min())
-
-    # Create an RGB version of the image
-    image_rgb = np.stack([image_normalized]*3, axis=-1)
-
-    # Create a mask overlay
-    mask_overlay_true = np.zeros_like(image_rgb)
-    mask_overlay_true[mask_true > 0.5] = [1, 0, 0]  # Set the mask to red
-
-    # Overlay the mask on the image with the specified opacity
-    overlayed_image_true = np.where(mask_overlay_true, (1-alpha)*image_rgb + alpha*mask_overlay_true, image_rgb)
-
-    if mask_tensor_pred is not None:
-        mask_pred = mask_tensor_pred.detach().squeeze().cpu().numpy()
-        # mask_pred_rescaled = (mask_pred - mask_pred.min()) / (mask_pred.max() - mask_pred.min())
-        mask_pred_rescaled = mask_pred
-
-        mask_overlay_pred = np.zeros_like(image_rgb)
-        #print(f'RGB mask overlay dim: {mask_overlay_pred.shape}')
-        #print(f'Predicted mask dim: {mask_pred_rescaled.shape}')
-        #print(f'Predicted mask range: {mask_pred_rescaled.min()} to {mask_pred_rescaled.max()}')
-        #mask_overlay_pred[mask_pred > 0.5] = [0, 1, 0]
-        #mask_pred_rescaled[mask_pred_rescaled > 0.5] = [0, 1, 0]
-        mask_overlay_pred[:, :, 0] = mask_pred_rescaled
-        overlayed_image_pred = (1 - alpha) * image_rgb + alpha * mask_overlay_pred
-        overlayed_image_pred = np.where(mask_overlay_pred, (1-alpha)*image_rgb + alpha*mask_overlay_pred, image_rgb)
-
-    # Display the overlayed image
-    plt.figure(figsize=(10, 10))
-
-    # True mask
-    plt.subplot(1, 2, 1)
-    plt.imshow(overlayed_image_true, cmap='gray')
-    plt.title('True mask')
-    plt.axis('off')
-
-    # Predicted mask
-    plt.subplot(1, 2, 2)
-    if mask_tensor_pred is not None:
-        plt.imshow(overlayed_image_pred, cmap='gray')
-        plt.title('Predicted mask')
-    else:
-        plt.imshow(image_rgb, cmap='gray')
-        plt.title('Original image')
-    plt.axis('off')
-
-    if save_path is not None:
-        plt.savefig(save_path, bbox_inches='tight')
-        #print(f'Visualization saved to {save_path}')
-
-    plt.show()
-    plt.close()
-
-
 def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred, alpha=1.0, save_path=None):
     """
     Visualizes the segmentation overlay on top of the original image.
@@ -138,11 +68,6 @@ def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_p
 
     plt.tight_layout()
     plt.show()
-
-
-
-
-
 
 
 def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
