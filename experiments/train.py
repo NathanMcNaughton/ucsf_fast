@@ -13,6 +13,7 @@ from torchvision import transforms
 
 from common.datasets import FASTDataset
 from common.models.small.unet_toy import ToyUNet
+from common.models.large.pretrained_backbone_unet import get_pretrained_backbone_unet
 
 
 def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred, alpha=1.0, save_path=None):
@@ -67,7 +68,13 @@ def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_p
     axes[2].axis('off')
 
     plt.tight_layout()
+
+    if save_path is not None:
+        plt.savefig(save_path + '.png', bbox_inches='tight')
+        plt.savefig(save_path + '.pdf', bbox_inches='tight')
+
     plt.show()
+    plt.close()
 
 
 def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
@@ -85,10 +92,65 @@ def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
     with torch.no_grad():
         pred_masks = model(images)
     for i in range(len(images)):
-        save_path = os.path.join(save_dir, f'epoch_{epoch}_batch_{batch}_image_{i}.png')
+        save_path = os.path.join(save_dir, f'epoch_{epoch}_batch_{batch}_image_{i}')
         visualize_segmentation_overlay(image_tensor=images[i], mask_tensor_true=masks[i],
                                        mask_tensor_pred=pred_masks[i], save_path=save_path)
     model.train()
+
+
+def pad_to_divisible_by_32(images, pad_value=0.0):
+    # Calculate padding to make image height and width divisible by 32. This is required by the UNet model.
+    _, _, height, width = images.shape
+    pad_height = (32 - height % 32) % 32
+    pad_width = (32 - width % 32) % 32
+
+    padding_top = pad_height // 2
+    padding_bottom = pad_height - padding_top
+    padding_left = pad_width // 2
+    padding_right = pad_width - padding_left
+
+    # Pad images
+    padded_images = nn.functional.pad(images, (padding_left, padding_right, padding_top, padding_bottom),
+                                      mode='constant', value=pad_value)
+    return padded_images
+
+
+def get_model(model_name, in_channels=1, n_classes=1):
+    """
+    Get the model by name.
+    Parameters:
+        model_name: The name of the model.
+        n_channels: The number of input channels.
+        n_classes: The number of output classes.
+    Returns:
+        model: The model.
+    """
+    if model_name == 'toy_unet':
+        model = ToyUNet(n_channels=in_channels, n_classes=n_classes)
+    elif model_name == 'pretrained_unet':
+        model = get_pretrained_backbone_unet(backbone_name='resnet18', in_channels=in_channels, n_classes=n_classes)
+    else:
+        raise ValueError(f'Invalid model name: {model_name}')
+    return model
+
+
+def get_optimizer(optimizer_name, model, learning_rate):
+    """
+    Get the optimizer by name.
+    Parameters:
+        optimizer_name: The name of the optimizer.
+        model: The model.
+        learning_rate: The learning rate.
+    Returns:
+        optimizer: The optimizer.
+    """
+    if optimizer_name == 'sgd':
+        optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+    elif optimizer_name == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    else:
+        raise ValueError(f'Invalid optimizer name: {optimizer_name}')
+    return optimizer
 
 
 def test_all(loader, model, loss_fn):
@@ -104,6 +166,10 @@ def test_all(loader, model, loss_fn):
     test_loss = 0
     with torch.no_grad():
         for batch, (images, masks) in enumerate(loader):
+            # Pad the images and masks to make them divisible by 32
+            images = pad_to_divisible_by_32(images, pad_value=-1.0)
+            masks = pad_to_divisible_by_32(masks, pad_value=0.0)
+
             images, masks = images.cuda(), masks.cuda()
             pred = model(images)
             test_loss += loss_fn(pred, masks).item()
@@ -113,20 +179,47 @@ def test_all(loader, model, loss_fn):
 
 
 def main():
-    learning_rate = 1e-3
+    model_name = 'pretrained_unet'
+    learning_rate = 3e-4
     loss_fn = 'BCEWithLogitsLoss'
-    loss_weight = 1  # 63.29 = 1/0.0158
-    optimizer = 'SGD'
+    loss_weight = 10  # 63.29 = 1/0.0158
+    optimizer = 'adam'
 
+    prop_train = 0.75
     n_total = 384
-    n_train = 2
+    n_train = prop_train * n_total
     n_test = n_total - n_train
 
     batch_size = 10
-    n_epochs = 100
+    n_epochs = 50
     n_batches = int((n_train / batch_size) * n_epochs)
-    k = 10  # Visualize the model predictions on the fixed set every k epochs
+    k = 5  # Visualize the model predictions on the fixed set every k epochs
     print(f'Total number of train batches: {n_batches}')
+
+    vis_images = [
+        'A_gkvDkD_90.png',
+        'A_EL1N1D_77.png',
+        'A_qGLY01_142.png',
+        'A_Ewz6Kp_49.png',
+        'A_q1zDQV_144.png',
+        'A_gp6pmo_128.png',
+        'A_g9JX16_25.png',
+        'A_gy2Qm5_107.png',
+        'A_gkvnrY_29.png',
+        'A_E0koOv_1.png'
+    ]
+
+    args = {
+        'model': model_name,
+        'learning_rate': learning_rate,
+        'loss_fn': loss_fn,
+        'loss_weight': loss_weight,
+        'optimizer': optimizer,
+        'n_train': n_train,
+        'batch_size': batch_size,
+        'n_epochs': n_epochs,
+        'k': k
+    }
 
     if torch.cuda.is_available():
         print(f'CUDA available. Using GPU.')
@@ -144,18 +237,9 @@ def main():
 
     # WandB setup
     os.environ['WANDB_API_KEY'] = config['wandb_api_key']
-    proj_name = '02_21_2024_ucsf_fast'
+    proj_name = '03_14_2024_ucsf_fast_test'
     wandb.init(project=proj_name, entity=config['wandb_entity'])
-
-    wandb.config = {
-        "learning_rate": 1e-3,
-        "batch_size": batch_size,
-        "n_epochs": n_epochs,
-        "n_train": n_train,
-        "loss_fn": "BCEWithLogitsLoss",
-        "loss_weight": "None",
-        "optimizer": "SGD"
-    }
+    wandb.config.update(args)
 
     project_dir = os.path.join(logging_dir, proj_name)
     if not os.path.exists(project_dir): os.makedirs(project_dir)
@@ -168,24 +252,39 @@ def main():
     if not os.path.exists(fig_dir): os.makedirs(fig_dir)
 
     # Create the datasets and dataloaders
-    img_dataset = FASTDataset(data_dir)
+    img_dataset = FASTDataset(data_dir, excluded_files=vis_images)
+
+    n_total = len(img_dataset)
+    n_train = int(prop_train * n_total)
+    n_test = n_total - n_train
 
     dataset_train, dataset_test = torch.utils.data.random_split(img_dataset, [n_train, n_test])
 
-    loader_train = DataLoader(dataset_train, batch_size=min(n_train, batch_size), shuffle=True, num_workers=2)
-    loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=2)
+    loader_train = DataLoader(dataset_train, batch_size=min(n_train, batch_size), shuffle=True, num_workers=1)
+    loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=1)
 
-    # Select a fixed set of exactly three test images and masks for visualization during training
-    fixed_images, fixed_masks = next(iter(loader_train))
-    fixed_images, fixed_masks = fixed_images[:2].cuda(), fixed_masks[:2].cuda()
+    # Create a separate dataset for the visualization images
+    vis_dataset = FASTDataset(data_dir, included_files=vis_images)
+    loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
 
-    model = ToyUNet(n_channels=1, n_classes=1)
+    # Get the fixed set of images and masks for visualization
+    fixed_images, fixed_masks = next(iter(loader_vis))
+
+    # Pad the images and masks to make them divisible by 32
+    fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
+    fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
+
+    fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
+
+    print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
+
+    model = get_model(model_name=model_name, in_channels=1, n_classes=1)
     model.cuda()
     trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
     print(f"Total number of trainable parameters: {trainable_params}")
 
     criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_weight))
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
+    optimizer = get_optimizer(optimizer_name=optimizer, model=model, learning_rate=learning_rate)
     # scheduler =
 
     print('Training...')
@@ -195,6 +294,9 @@ def main():
         for batch, (images, masks) in enumerate(loader_train):
             model.train()
 
+            # Pad the images and masks to make them divisible by 32
+            images = pad_to_divisible_by_32(images, pad_value=-1.0)
+            masks = pad_to_divisible_by_32(masks, pad_value=0.0)
             images, masks = images.cuda(), masks.cuda()
 
             # Compute prediction error

@@ -45,12 +45,15 @@ class FASTDataset(Dataset):
     """
     DEFAULT_IMAGE_SIZE = (960, 720)
     
-    def __init__(self, data_dir: str, resize: bool = True, transform = None):
+    def __init__(self, data_dir: str, resize: bool = True, transform = None, included_files = None, excluded_files=None):
         self.data_dir = data_dir
         self.transform = transform
         self.resize = resize
         # List all files in directory and filter out segmentation label images
-        self.image_files = [f for f in os.listdir(data_dir) if not '_Morison' in f and f.endswith('.png')]
+        if included_files:
+            self.image_files = [f for f in included_files if not '_Morison' in f and f.endswith('.png') and f in os.listdir(data_dir)]
+        else:
+            self.image_files = [f for f in os.listdir(data_dir) if not '_Morison' in f and f.endswith('.png') and f not in excluded_files]
         
     def __len__(self):
         return len(self.image_files)
