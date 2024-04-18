@@ -209,6 +209,12 @@ def main():
         'A_E0koOv_1.png'
     ]
 
+    # Temporary list of randomly-drawn vis images for grant proposal. Will remove later.
+    vis_images = [
+        'A_EM61ro_0.png',
+        'A_gkvD8D_149.png'
+    ]
+
     args = {
         'model': model_name,
         'learning_rate': learning_rate,
