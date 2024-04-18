@@ -44,3 +44,5 @@ free_fluid_present = [False] * len(annotation_data)
 for idx in range(len(annotation_data)):
     mask_present[idx] = annotation_data[idx]['labelId'] == label_of_interest[0]
     free_fluid_present[idx] = annotation_data[idx]['labelId'] == label_of_interest[1]
+
+
