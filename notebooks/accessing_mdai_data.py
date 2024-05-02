@@ -4,8 +4,15 @@ import os
 import shutil
 import numpy as np
 import pandas as pd
-from PIL import Image
+import matplotlib.pyplot as plt
+from PIL import Image as PILImage
+from PIL import ImageDraw
+# from wand.image import Image
+# from wand.drawing import Drawing
+# from wand.color import Color
+# from scipy.ndimage import binary_fill_holes
 from datetime import datetime
+from collections import Counter, deque, defaultdict
 
 
 """
@@ -172,37 +179,80 @@ def get_annotations_from_mdai(args):
 
 
 def convert_annotation_to_image_and_label(annotation, args):
-    """
-    This function converts a mask annotation to an image and label.
-    :param annotation: dictionary, mask annotation
-    :return: dictionary, image and label
-    """
     # Use the SOPInstanceUID and frameNumber to create a filename for the image.
     mask_image_filename = f"masks/{annotation['SOPInstanceUID']}_{annotation['frameNumber']}_Mask.jpg"
     raw_image_filename = f"{annotation['SOPInstanceUID']}_{annotation['frameNumber']}.jpg"
-    #
-    # Check if file already exists in image directory. If it does, return None.
-    if os.path.exists(os.path.join(args['IMAGE_DIR'], mask_image_filename)):
-        return None
-    #
-    mask_shape = (annotation['height'], annotation['width'])
-    #
-    mask_pixel_data = annotation['data']['foreground'][0]
     positive_label = interpret_free_fluid_label(args['LABEL_DICT'][annotation['labelId']])
-    #
-    # Create a numpy array of the same shape as the mask with all zero entries.
-    mask_array = np.zeros(mask_shape)
-    #
-    # Fill in the mask_array with the pixel data from the mask_pixel_data
-    for pixel in mask_pixel_data:
-        mask_array[pixel[1], pixel[0]] = 1
-    #
-    # Save the mask_array as a jpg
-    mask_array = (mask_array * 255).astype(np.uint8)
-    mask_array = Image.fromarray(mask_array)
-    mask_array.save(os.path.join(args['IMAGE_DIR'], mask_image_filename))
-    #
+
+    frame_width = annotation['width']
+    frame_height = annotation['height']
+
+    # Flatten the array of 2D arrays
+    flattened_array = np.concatenate(annotation['data']['foreground'][0])
+
+    # Calculate the length of the flattened array
+    length_list = len(flattened_array) // 2
+
+    # Reshape the flattened array into (length_list, 2)
+    list_in = flattened_array.reshape((length_list, 2))
+
+    image = PILImage.new('RGB', (frame_width, frame_height), color='black')
+    draw = ImageDraw.Draw(image)
+    draw.polygon(list_in.flatten().tolist(), fill='white', outline='white', width=2)
+
+    plt.figure(figsize=(frame_width / 72, frame_height / 72), dpi=72)
+    plt.imshow(image)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig(os.path.join(args['IMAGE_DIR'], mask_image_filename), dpi=72)
+    #plt.savefig(f"/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/{file_name}", dpi=72)
+    plt.close()
+
     return raw_image_filename, positive_label
+
+
+# def convert_annotation_to_image_and_label(annotation, args):
+#     """
+#     This function converts a mask annotation to an image and label.
+#     :param annotation: dictionary, mask annotation
+#     :return: dictionary, image and label
+#     """
+#     # Use the SOPInstanceUID and frameNumber to create a filename for the image.
+#     mask_image_filename = f"masks/{annotation['SOPInstanceUID']}_{annotation['frameNumber']}_Mask.jpg"
+#     raw_image_filename = f"{annotation['SOPInstanceUID']}_{annotation['frameNumber']}.jpg"
+#     #
+#     # Check if file already exists in image directory. If it does, return None.
+#     if os.path.exists(os.path.join(args['IMAGE_DIR'], mask_image_filename)):
+#         return None
+#     #
+#     mask_shape = (annotation['height'], annotation['width'])
+#     #
+#     mask_pixel_data = annotation['data']['foreground'][0]
+#     positive_label = interpret_free_fluid_label(args['LABEL_DICT'][annotation['labelId']])
+#     #
+#     # Create a numpy array of the same shape as the mask with all zero entries.
+#     mask_array = np.zeros(mask_shape)
+#     #
+#     # Fill in the mask_array with the pixel data from the mask_pixel_data
+#     for pixel in mask_pixel_data:
+#         mask_array[pixel[1], pixel[0]] = 1
+#     #
+#     # Pad the mask array to avoid issues with shapes touching the edge
+#     # padded_mask_array = np.pad(mask_array, pad_width=1, mode='constant', constant_values=0)
+#     #
+#     # Fill the holes in the padded mask array
+#     # filled_padded_mask_array = binary_fill_holes(padded_mask_array)
+#     #
+#     # Remove the padding from the filled mask array
+#     # filled_mask_array = filled_padded_mask_array[1:-1, 1:-1]
+#     #
+#     # Save the mask_array as a jpg
+#     # mask_array = (filled_mask_array * 255).astype(np.uint8)
+#     mask_array = (mask_array * 255).astype(np.uint8)
+#     mask_image = PILImage.fromarray(mask_array)
+#     mask_image.save(os.path.join(args['IMAGE_DIR'], mask_image_filename))
+#     #
+#     return raw_image_filename, positive_label
 
 
 def process_annotations(annotations, args):
@@ -362,8 +412,10 @@ def collect_and_rename_images(updated_rows, args):
 
     return None
 
+#######################
+# Debugging functions #
+#######################
 
-from collections import Counter
 def investigate_indexing_mismatch():
     mask_file_names = os.listdir('/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/masks')
     mask_file_names = [x.split('_')[1] for x in mask_file_names]
@@ -390,6 +442,47 @@ def investigate_indexing_mismatch():
 
     return None
 
+
+def find_cluster_sizes(array):
+    """
+    Find all clusters of '1's in the array and record the frequency of each group size.
+    If the mask outline is continuous, this function will return a single cluster size.
+
+    :param array: 2D numpy array of 0s and 1s
+    :return: Dictionary where keys are group sizes and values are frequencies
+    """
+    rows, cols = array.shape
+    visited = np.zeros_like(array, dtype=bool)
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1),  # N, S, W, E
+                  (-1, -1), (-1, 1), (1, -1), (1, 1)]  # NW, NE, SW, SE
+
+    cluster_sizes = defaultdict(int)
+
+    for i in range(rows):
+        for j in range(cols):
+            if array[i, j] == 1 and not visited[i, j]:
+                # Start BFS from the unvisited '1' cell
+                queue = deque([(i, j)])
+                visited[i, j] = True
+                cluster_size = 1
+
+                while queue:
+                    r, c = queue.popleft()
+                    for dr, dc in directions:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and array[nr][nc] == 1:
+                            visited[nr][nc] = True
+                            queue.append((nr, nc))
+                            cluster_size += 1
+
+                # Record the frequency of the cluster size
+                cluster_sizes[cluster_size] += 1
+
+    print("Cluster Size Frequencies:")
+    for size, freq in sorted(cluster_sizes.items()):
+        print(f"Size {size}: {freq} {'cluster' if freq == 1 else 'clusters'}")
+    print()
+    return cluster_sizes
 
 
 def print_dict(d, indent=0):
