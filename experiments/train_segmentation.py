@@ -303,10 +303,10 @@ def main():
         model.train()
 
         for batch, (images, masks, free_fluid_labels) in enumerate(loader_train):
-            torch.save(
-                {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
-                '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_unpadded_data_check.pth'
-            ) ############ DELETE THIS LINE ############
+            # torch.save(
+            #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
+            #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_unpadded_data_check.pth'
+            # ) ############ DELETE THIS LINE ############
 
             model.train()
 
@@ -314,12 +314,12 @@ def main():
             images = pad_to_divisible_by_32(images, pad_value=-1.0)
             masks = pad_to_divisible_by_32(masks, pad_value=0.0)
 
-            torch.save(
-                {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
-                '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_data_check.pth'
-            ) ############ DELETE THIS LINE ############
+            # torch.save(
+            #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
+            #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_data_check.pth'
+            # ) ############ DELETE THIS LINE ############
 
-            break ############ DELETE THIS LINE ############
+            # break ############ DELETE THIS LINE ############
 
             images, masks = images.cuda(), masks.cuda()
 
@@ -332,7 +332,7 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
 
-        break ############ DELETE THIS LINE ############
+        # break ############ DELETE THIS LINE ############
 
         test_loss = test_all(loader_test, model, criterion)
         print(f'[Epoch {epoch+1} of {n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
