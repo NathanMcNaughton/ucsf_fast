@@ -11,7 +11,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from common.datasets import FASTDataset
+import sys
+root_dir = '/accounts/campus/austin.zane/ucsf_fast'
+sys.path.append(root_dir)
+os.chdir(root_dir)
+
+from common.datasets import FASTSegmentationDataset
 from common.models.small.unet_toy import ToyUNet
 from common.models.large.pretrained_backbone_unet import get_pretrained_backbone_unet
 
@@ -186,7 +191,7 @@ def main():
     optimizer = 'adam'
 
     prop_train = 0.75
-    n_total = 384
+    n_total = 500
     n_train = prop_train * n_total
     n_test = n_total - n_train
 
@@ -237,13 +242,12 @@ def main():
         config = yaml.safe_load(f)
 
     # Might change this to get the directory from the config file
-    data_dir = '/scratch/users/austin.zane/ucsf_fast/data/pilot_labeling/AnnotationData/MorisonPouchMasks_1-23'
-    # fig_dir = '/scratch/users/austin.zane/ucsf_fast/figures/segmentation_overlay/02_21_2024'
+    data_dir = '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison'
     logging_dir = '/scratch/users/austin.zane/ucsf_fast/logging'
 
     # WandB setup
     os.environ['WANDB_API_KEY'] = config['wandb_api_key']
-    proj_name = '03_14_2024_ucsf_fast_test'
+    proj_name = '05_02_2024_ucsf_fast_test'
     wandb.init(project=proj_name, entity=config['wandb_entity'])
     wandb.config.update(args)
 
@@ -258,7 +262,8 @@ def main():
     if not os.path.exists(fig_dir): os.makedirs(fig_dir)
 
     # Create the datasets and dataloaders
-    img_dataset = FASTDataset(data_dir, excluded_files=vis_images)
+    # img_dataset = FASTSegmentationDataset(data_dir, excluded_files=vis_images)
+    img_dataset = FASTSegmentationDataset(data_dir)
 
     n_total = len(img_dataset)
     n_train = int(prop_train * n_total)
@@ -270,19 +275,19 @@ def main():
     loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=1)
 
     # Create a separate dataset for the visualization images
-    vis_dataset = FASTDataset(data_dir, included_files=vis_images)
-    loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
+    # vis_dataset = FASTSegmentationDataset(data_dir, included_files=vis_images)
+    # loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
 
     # Get the fixed set of images and masks for visualization
-    fixed_images, fixed_masks = next(iter(loader_vis))
+    # fixed_images, fixed_masks = next(iter(loader_vis))
 
     # Pad the images and masks to make them divisible by 32
-    fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
-    fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
+    # fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
+    # fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
 
-    fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
+    # fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
 
-    print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
+    # print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
 
     model = get_model(model_name=model_name, in_channels=1, n_classes=1)
     model.cuda()
@@ -297,12 +302,25 @@ def main():
     for epoch in range(n_epochs):
         model.train()
 
-        for batch, (images, masks) in enumerate(loader_train):
+        for batch, (images, masks, free_fluid_labels) in enumerate(loader_train):
+            torch.save(
+                {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
+                '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_unpadded_data_check.pth'
+            ) ############ DELETE THIS LINE ############
+
             model.train()
 
             # Pad the images and masks to make them divisible by 32
             images = pad_to_divisible_by_32(images, pad_value=-1.0)
             masks = pad_to_divisible_by_32(masks, pad_value=0.0)
+
+            torch.save(
+                {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
+                '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_data_check.pth'
+            ) ############ DELETE THIS LINE ############
+
+            break ############ DELETE THIS LINE ############
+
             images, masks = images.cuda(), masks.cuda()
 
             # Compute prediction error
@@ -314,12 +332,15 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
 
+        break ############ DELETE THIS LINE ############
+
         test_loss = test_all(loader_test, model, criterion)
         print(f'[Epoch {epoch+1} of {n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
         wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
 
-        if (epoch+1) % k == 0:
-            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
+
+        #if (epoch+1) % k == 0:
+        #    visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
 
     print('Saving model...')
 
