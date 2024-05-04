@@ -199,14 +199,8 @@ def convert_annotation_to_image_and_label(annotation, args):
     image = PILImage.new('RGB', (frame_width, frame_height), color='black')
     draw = ImageDraw.Draw(image)
     draw.polygon(list_in.flatten().tolist(), fill='white', outline='white', width=2)
-
-    plt.figure(figsize=(frame_width / 72, frame_height / 72), dpi=72)
-    plt.imshow(image)
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig(os.path.join(args['IMAGE_DIR'], mask_image_filename), dpi=72)
-    #plt.savefig(f"/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/{file_name}", dpi=72)
-    plt.close()
+    image.save(os.path.join(args['IMAGE_DIR'], mask_image_filename))
+    # image.save(f"/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/PIL_saved_mask.jpg")
 
     return raw_image_filename, positive_label
 
