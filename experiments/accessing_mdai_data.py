@@ -1,4 +1,5 @@
 import json
+import yaml
 import mdai  # Need to install mdai library via pip
 import os
 import shutil
@@ -13,6 +14,8 @@ from PIL import ImageDraw
 # from scipy.ndimage import binary_fill_holes
 from datetime import datetime
 from collections import Counter, deque, defaultdict
+
+from experiments.utils import load_config
 
 
 """
@@ -53,34 +56,34 @@ collect_and_rename_images(annotations, image_dir):
 """
 
 
-mdai_args = {
-    "DOMAIN": "ucsf.md.ai",
-    "PROJECT_ID": "7YNd8LNb",
-    "DATASET_IDS": [
-        "D_pQ7xYz",
-        "D_aQB9GJ",
-        "D_rVgbwz",
-        "D_QdRe2V"
-    ],
-    # "DATA_DIR": "/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison",
-    "ACCESS_TOKEN": "05cbca87af202fdfb942fbd290af7c3e",
-        # Can get your own token from https://ucsf.md.ai/hub/settings?tab=tokens
-    "DATASET_NAMES": [
-        'Positive Classification (Full Study - A)',
-        'Positive Classification (Full Study - B) ',
-        'Positive Classification (RUQ)',
-    ],
-    "LABEL_GROUP": "Morison Pouch Annotation",
-    "LABELS": [
-        'Mask-MorisonPouch',
-        'Mask-Morison FreeFluid'
-    ],
-    "IMAGE_DIR": "/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison",
-    "RUQ_DIR": "/scratch/users/austin.zane/ucsf_fast/data/pilot_labeling/DCMFRM",  # M:\TempAnnotations_Morison\DCMFRM\DCMFRM
-    # "RUQ_INSTANCE_RECORD": "",  # Not needed for now
-    "P1315_DIR": "/scratch/users/austin.zane/ucsf_fast/data/P1315/P1315_Images",  # M:\Positive_13_15\P1315_Images
-    "P1315_INSTANCE_RECORD": "/scratch/users/austin.zane/ucsf_fast/data/P1315/InstanceRecord.csv",  # M:\Positive_13_15\InstanceRecord.csv
-}
+# mdai_args = {
+#     "DOMAIN": "ucsf.md.ai",
+#     "PROJECT_ID": "7YNd8LNb",
+#     "DATASET_IDS": [
+#         "D_pQ7xYz",
+#         "D_aQB9GJ",
+#         "D_rVgbwz",
+#         "D_QdRe2V"
+#     ],
+#     # "DATA_DIR": "/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison",
+#     "ACCESS_TOKEN": "05cbca87af202fdfb942fbd290af7c3e",
+#         # Can get your own token from https://ucsf.md.ai/hub/settings?tab=tokens
+#     "DATASET_NAMES": [
+#         'Positive Classification (Full Study - A)',
+#         'Positive Classification (Full Study - B) ',
+#         'Positive Classification (RUQ)',
+#     ],
+#     "LABEL_GROUP": "Morison Pouch Annotation",
+#     "LABELS": [
+#         'Mask-MorisonPouch',
+#         'Mask-Morison FreeFluid'
+#     ],
+#     "IMAGE_DIR": "/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison",
+#     "RUQ_DIR": "/scratch/users/austin.zane/ucsf_fast/data/pilot_labeling/DCMFRM",  # M:\TempAnnotations_Morison\DCMFRM\DCMFRM
+#     # "RUQ_INSTANCE_RECORD": "",  # Not needed for now
+#     "P1315_DIR": "/scratch/users/austin.zane/ucsf_fast/data/P1315/P1315_Images",  # M:\Positive_13_15\P1315_Images
+#     "P1315_INSTANCE_RECORD": "/scratch/users/austin.zane/ucsf_fast/data/P1315/InstanceRecord.csv",  # M:\Positive_13_15\InstanceRecord.csv
+# }
 
 
 def interpret_free_fluid_label(label_name):
@@ -497,6 +500,9 @@ def print_dict(d, indent=0):
 
 
 def main():
+
+    mdai_args = load_config()
+
     annotations = get_annotations_from_mdai(mdai_args)
     #
     updated_rows, duplicated_rows, compare_rows = process_annotations(annotations, mdai_args)

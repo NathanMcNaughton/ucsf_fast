@@ -3,3 +3,30 @@ wandb_api_key: 'YOUR_WANDB_API_KEY'
 scf_root: 'YOUR_PROJECT_ROOT'
 data_dir: 'YOUR_DATA_DIR'
 logging_dir: 'YOUR_LOGGING_DIR'
+
+# mdai_args
+DOMAIN: "ucsf.md.ai"
+PROJECT_ID: "7YNd8LNb"
+DATASET_IDS: [
+    "D_pQ7xYz",
+    "D_aQB9GJ",
+    "D_rVgbwz",
+    "D_QdRe2V"
+]
+ACCESS_TOKEN: "YOUR_MDAI_ACCESS_TOKEN"
+    # Can get your own token from https://ucsf.md.ai/hub/settings?tab=tokens
+DATASET_NAMES: [
+#     'Positive Classification (Full Study - A)',
+    'Positive Classification (Full Study - B) ',
+    'Positive Classification (RUQ)',
+]
+LABEL_GROUP: "Morison Pouch Annotation"
+LABELS: [
+    'Mask-MorisonPouch',
+    'Mask-Morison FreeFluid'
+]
+IMAGE_DIR: "/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison"
+RUQ_DIR: "/scratch/users/austin.zane/ucsf_fast/data/pilot_labeling/DCMFRM"  # M:\TempAnnotations_Morison\DCMFRM\DCMFRM
+# RUQ_INSTANCE_RECORD: ""  # Not needed for now
+P1315_DIR: "/scratch/users/austin.zane/ucsf_fast/data/P1315/P1315_Images"  # M:\Positive_13_15\P1315_Images
+P1315_INSTANCE_RECORD: "/scratch/users/austin.zane/ucsf_fast/data/P1315/InstanceRecord.csv"  # M:\Positive_13_15\InstanceRecord.csv
