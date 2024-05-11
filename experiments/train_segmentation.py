@@ -12,10 +12,11 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 import sys
-root_dir = '/accounts/campus/austin.zane/ucsf_fast'
-sys.path.append(root_dir)
-os.chdir(root_dir)
+# root_dir = '/accounts/campus/austin.zane/ucsf_fast'
+# sys.path.append(root_dir)
+# os.chdir(root_dir)
 
+from experiments.utils import load_config, DICELoss
 from common.datasets import FASTSegmentationDataset
 from common.models.small.unet_toy import ToyUNet
 from common.models.large.pretrained_backbone_unet import get_pretrained_backbone_unet
@@ -170,7 +171,7 @@ def test_all(loader, model, loss_fn):
     model.eval()
     test_loss = 0
     with torch.no_grad():
-        for batch, (images, masks) in enumerate(loader):
+        for batch, (images, masks, free_fluid_labels) in enumerate(loader):
             # Pad the images and masks to make them divisible by 32
             images = pad_to_divisible_by_32(images, pad_value=-1.0)
             masks = pad_to_divisible_by_32(masks, pad_value=0.0)
@@ -184,9 +185,12 @@ def test_all(loader, model, loss_fn):
 
 
 def main():
+
+    # In the future, we will pass these as command line arguments
     model_name = 'pretrained_unet'
     learning_rate = 3e-4
     loss_fn = 'BCEWithLogitsLoss'
+    # loss_fn = 'DICELoss'
     loss_weight = 10  # 63.29 = 1/0.0158
     optimizer = 'adam'
 
@@ -196,29 +200,7 @@ def main():
     n_test = n_total - n_train
 
     batch_size = 10
-    n_epochs = 50
-    n_batches = int((n_train / batch_size) * n_epochs)
-    k = 5  # Visualize the model predictions on the fixed set every k epochs
-    print(f'Total number of train batches: {n_batches}')
-
-    vis_images = [
-        'A_gkvDkD_90.png',
-        'A_EL1N1D_77.png',
-        'A_qGLY01_142.png',
-        'A_Ewz6Kp_49.png',
-        'A_q1zDQV_144.png',
-        'A_gp6pmo_128.png',
-        'A_g9JX16_25.png',
-        'A_gy2Qm5_107.png',
-        'A_gkvnrY_29.png',
-        'A_E0koOv_1.png'
-    ]
-
-    # Temporary list of randomly-drawn vis images for grant proposal. Will remove later.
-    vis_images = [
-        'A_EM61ro_0.png',
-        'A_gkvD8D_149.png'
-    ]
+    n_epochs = 10
 
     args = {
         'model': model_name,
@@ -232,22 +214,43 @@ def main():
         'k': k
     }
 
+    n_batches = int((n_train / batch_size) * n_epochs)
+    k = 5  # Visualize the model predictions on the fixed set every k epochs
+    print(f'Total number of train batches: {n_batches}')
+
+    vis_images = [
+        ('1.2.840.114340.3.8251050064157.3.20190421.114851.4961.6_137.jpg', -1),
+        ('1.2.840.114340.3.48100021226225.3.20190816.202201.6283.4_39.jpg', -1),
+        ('1.2.840.114340.3.8251050064157.3.20180802.150631.1897.6_152.jpg', -1),
+        ('1.2.840.114340.3.8251050064157.3.20180425.145653.384.6_0.jpg', -1),
+        ('1.2.840.114340.3.48100016190144.3.20200705.200229.5904.4_0.jpg', -1),
+        ('1.2.840.114340.3.8251017179172.3.20141207.22903.11967.6_5.jpg', 1),
+        ('1.2.840.114340.3.8251017179172.3.20150128.164707.13073.6_79.jpg', 1),
+        ('1.2.840.114340.3.8251017179172.3.20140531.234055.7585.6_41.jpg', 1),
+        ('1.2.840.114340.3.48100016190144.3.20201005.183539.6271.4_0.jpg', 1),
+        ('1.2.840.114340.3.8251017179172.3.20150413.183009.15018.6_53.jpg', 1)
+    ]
+
+    vis_images = [img[0] for img in vis_images]
+
+    # Temporary list of randomly-drawn vis images for grant proposal. Will remove later.
+    # vis_images = [vis_images[0], vis_images[-1]]
+
     if torch.cuda.is_available():
         print(f'CUDA available. Using GPU.')
     else:
         print('CUDA is not available. Try again with a GPU. Exiting...')
         exit(1)
 
-    with open('config.yaml', 'r') as f:
-        config = yaml.safe_load(f)
+    config = load_config()
 
-    # Might change this to get the directory from the config file
-    data_dir = '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison'
-    logging_dir = '/scratch/users/austin.zane/ucsf_fast/logging'
+    # Change this to get the directory from the config file
+    data_dir = config['data_dir']
+    logging_dir = config['logging_dir']
 
     # WandB setup
     os.environ['WANDB_API_KEY'] = config['wandb_api_key']
-    proj_name = '05_02_2024_ucsf_fast_test'
+    proj_name = '05_10_2024_ucsf_fast_test'
     wandb.init(project=proj_name, entity=config['wandb_entity'])
     wandb.config.update(args)
 
@@ -262,8 +265,8 @@ def main():
     if not os.path.exists(fig_dir): os.makedirs(fig_dir)
 
     # Create the datasets and dataloaders
-    # img_dataset = FASTSegmentationDataset(data_dir, excluded_files=vis_images)
-    img_dataset = FASTSegmentationDataset(data_dir)
+    img_dataset = FASTSegmentationDataset(data_dir, excluded_files=vis_images)
+    # img_dataset = FASTSegmentationDataset(data_dir)
 
     n_total = len(img_dataset)
     n_train = int(prop_train * n_total)
@@ -275,26 +278,32 @@ def main():
     loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=1)
 
     # Create a separate dataset for the visualization images
-    # vis_dataset = FASTSegmentationDataset(data_dir, included_files=vis_images)
-    # loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
+    vis_dataset = FASTSegmentationDataset(data_dir, included_files=vis_images)
+    loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
 
     # Get the fixed set of images and masks for visualization
-    # fixed_images, fixed_masks = next(iter(loader_vis))
+    fixed_images, fixed_masks, fixed_free_fluid_labels = next(iter(loader_vis))
 
     # Pad the images and masks to make them divisible by 32
-    # fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
-    # fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
+    fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
+    fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
 
-    # fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
+    fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
 
-    # print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
+    print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
 
     model = get_model(model_name=model_name, in_channels=1, n_classes=1)
     model.cuda()
     trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
     print(f"Total number of trainable parameters: {trainable_params}")
 
-    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_weight))
+    if loss_fn == 'BCEWithLogitsLoss':
+        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_weight))
+    elif loss_fn == 'DICELoss':
+        criterion = DICELoss()
+    else:
+        raise ValueError(f'Invalid loss function: {loss_fn}. Only BCEWithLogitsLoss and DICELoss are supported.')
+
     optimizer = get_optimizer(optimizer_name=optimizer, model=model, learning_rate=learning_rate)
     # scheduler =
 
@@ -339,8 +348,8 @@ def main():
         wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
 
 
-        #if (epoch+1) % k == 0:
-        #    visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
+        if (epoch+1) % k == 0:
+            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
 
     print('Saving model...')
 

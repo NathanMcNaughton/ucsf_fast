@@ -132,6 +132,12 @@ class FASTSegmentationDataset(Dataset):
         self.resize = resize
         self.image_files = np.genfromtxt(os.path.join(data_dir, 'free_fluid_labels.csv'),
                                  delimiter=',', names=True, dtype=None, encoding=None)
+        # The following lines allow us to specify a small subset of images to use for visualization throuhout training
+        # These images should not be included in the training or testing data.
+        if included_files:
+            self.image_files = [f for f in self.image_files if f[0] in included_files]
+        elif excluded_files:
+            self.image_files = [f for f in self.image_files if f[0] not in excluded_files]
 
         # List all files in directory and filter out segmentation label images
         # if included_files:
@@ -145,7 +151,7 @@ class FASTSegmentationDataset(Dataset):
         return len(self.image_files)
 
     def __getitem__(self, index):
-        img_name, free_fluid_label = self.image_files[index]
+        img_name, free_fluid_label, _, _ = self.image_files[index]
         label_name = img_name.rsplit('.', 1)[0] + '_Mask.jpg'
 
         img_path = os.path.join(self.data_dir, 'raw_images', img_name)

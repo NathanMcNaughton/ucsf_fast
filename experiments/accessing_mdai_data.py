@@ -59,14 +59,16 @@ mdai_args = {
     "DATASET_IDS": [
         "D_pQ7xYz",
         "D_aQB9GJ",
-        "D_rVgbwz"
+        "D_rVgbwz",
+        "D_QdRe2V"
     ],
     # "DATA_DIR": "/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison",
     "ACCESS_TOKEN": "05cbca87af202fdfb942fbd290af7c3e",
         # Can get your own token from https://ucsf.md.ai/hub/settings?tab=tokens
     "DATASET_NAMES": [
         'Positive Classification (Full Study - A)',
-        'Positive Classification (RUQ)'
+        'Positive Classification (Full Study - B) ',
+        'Positive Classification (RUQ)',
     ],
     "LABEL_GROUP": "Morison Pouch Annotation",
     "LABELS": [
@@ -167,13 +169,17 @@ def get_annotations_from_mdai(args):
     mask_annotations = []
     for ds in data['datasets']:
         if ds['name'] in args['DATASET_NAMES']:
+            ds_counter = 0
             for annotation in ds['annotations']:
                 if annotation['labelId'] in label_ids:
+                    ds_counter += 1
+                    annotation['dataset_name'] = ds['name']
                     mask_annotations.append(annotation)
+            print(f"{ds_counter} mask annotations found in dataset {ds['name']}.")
     if len(mask_annotations) == 0:
         raise ValueError(f"No mask annotations found in data.")
     else:
-        print(f"{len(mask_annotations)} mask annotations found in data.")
+        print(f"{len(mask_annotations)} total mask annotations found in data.")
     #
     return mask_annotations
 
@@ -183,6 +189,8 @@ def convert_annotation_to_image_and_label(annotation, args):
     mask_image_filename = f"masks/{annotation['SOPInstanceUID']}_{annotation['frameNumber']}_Mask.jpg"
     raw_image_filename = f"{annotation['SOPInstanceUID']}_{annotation['frameNumber']}.jpg"
     positive_label = interpret_free_fluid_label(args['LABEL_DICT'][annotation['labelId']])
+    creator_id = annotation['createdById']
+    dataset_name = annotation['dataset_name']
 
     frame_width = annotation['width']
     frame_height = annotation['height']
@@ -202,7 +210,7 @@ def convert_annotation_to_image_and_label(annotation, args):
     image.save(os.path.join(args['IMAGE_DIR'], mask_image_filename))
     # image.save(f"/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/PIL_saved_mask.jpg")
 
-    return raw_image_filename, positive_label
+    return raw_image_filename, positive_label, creator_id, dataset_name
 
 
 def process_annotations(annotations, args):
@@ -222,7 +230,7 @@ def process_annotations(annotations, args):
     #
     csv_filename = os.path.join(args['IMAGE_DIR'], "free_fluid_labels.csv")
     #
-    new_label_rows = pd.DataFrame(label_list, columns=['filename', 'free_fluid_label'])
+    new_label_rows = pd.DataFrame(label_list, columns=['filename', 'free_fluid_label', 'creator_id', 'dataset_name'])
     #
     if os.path.exists(csv_filename):
         # Load the existing data
@@ -232,19 +240,60 @@ def process_annotations(annotations, args):
     else:
         updated_rows = new_label_rows
     #
+    ########################
+    # Modified code begins #
+    ########################
+    # print('check 0')
+    duplicates = updated_rows.duplicated(subset=['filename'], keep=False)  ###### Delete later
+    duplicated_rows = updated_rows[duplicates]  ###### Delete later
+    # print('check 1')
+
     previous_nrows = updated_rows.shape[0]
     updated_rows = updated_rows.drop_duplicates(subset=['filename'], keep='last')
+    # updated_rows = updated_rows.drop_duplicates()  ######## Delete later
     new_nrows = updated_rows.shape[0]
-    print(f"Removed {previous_nrows - new_nrows} duplicate rows.")
+    print(f"Removed {previous_nrows - new_nrows} duplicate rows based solely on filename.")
+    # print('check 2')
+    # Create the compare_rows DataFrame
+    compare_rows = pd.DataFrame(columns=['filename', 'free_fluid_label0', 'creator_id0', 'dataset_name0',
+                                         'free_fluid_label1', 'creator_id1', 'dataset_name1'])
+
+    # Iterate over each row in duplicated_rows
+    for _, row in duplicated_rows.iterrows():
+        filename = row['filename']
+
+        # Find the corresponding row in updated_rows
+        updated_row = updated_rows.loc[updated_rows['filename'] == filename].iloc[0]
+
+        # Create a new row for compare_rows
+        # Create a new row for compare_rows
+        new_row = {
+            'filename': [filename],
+            'free_fluid_label0': [updated_row['free_fluid_label']],
+            'creator_id0': [updated_row['creator_id']],
+            'dataset_name0': [updated_row['dataset_name']],
+            'free_fluid_label1': [row['free_fluid_label']],
+            'creator_id1': [row['creator_id']],
+            'dataset_name1': [row['dataset_name']]
+        }
+
+        # Append the new row to compare_rows
+        compare_rows = pd.concat([compare_rows, pd.DataFrame(new_row)], ignore_index=True)
+    # print('check3')
     #
-    updated_rows.to_csv(csv_filename, index=False)
+    updated_rows.to_csv(csv_filename, index=False)  ######## Uncomment later
+
+    ########################
+    # Modified code ends   #
+    ########################
     #
     # Counting the occurrences of postive and negative annotations
     val_counts = updated_rows['free_fluid_label'].value_counts()
     print(f'Number of positive images: {val_counts.get(1, 0)}')
     print(f'Number of negative images: {val_counts.get(-1, 0)}')
     #
-    return updated_rows
+
+    return updated_rows, duplicated_rows, compare_rows
 
 
 def collect_and_rename_images(updated_rows, args):
@@ -450,7 +499,7 @@ def print_dict(d, indent=0):
 def main():
     annotations = get_annotations_from_mdai(mdai_args)
     #
-    updated_rows = process_annotations(annotations, mdai_args)
+    updated_rows, duplicated_rows, compare_rows = process_annotations(annotations, mdai_args)
     #
     collect_and_rename_images(updated_rows, mdai_args)
     #
