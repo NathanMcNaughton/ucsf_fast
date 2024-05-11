@@ -6,3 +6,4 @@ out/*
 !out/.gitkeep
 wandb/
 *.tar.gz
+config_local.yaml
