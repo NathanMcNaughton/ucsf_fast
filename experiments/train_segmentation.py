@@ -201,6 +201,7 @@ def main():
 
     batch_size = 10
     n_epochs = 10
+    k = 5  # Visualize the model predictions on the fixed set every k epochs
 
     args = {
         'model': model_name,
@@ -215,7 +216,6 @@ def main():
     }
 
     n_batches = int((n_train / batch_size) * n_epochs)
-    k = 5  # Visualize the model predictions on the fixed set every k epochs
     print(f'Total number of train batches: {n_batches}')
 
     vis_images = [
