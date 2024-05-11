@@ -1,7 +1,6 @@
 .ipynb_checkpoints/
 __pycache__/
 *.out
-config.yaml
 out/*
 !out/.gitkeep
 wandb/
