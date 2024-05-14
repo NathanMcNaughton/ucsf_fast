@@ -21,6 +21,79 @@ from common.datasets import FASTSegmentationDataset
 from common.models.small.unet_toy import ToyUNet
 from common.models.large.pretrained_backbone_unet import get_pretrained_backbone_unet
 
+from common.logging import VanillaLogger
+
+"""
+# In the future, we will pass these as command line arguments
+    model_name = 'pretrained_unet'
+    learning_rate = 3e-4
+    loss_fn = 'BCEWithLogitsLoss'
+    # loss_fn = 'DICELoss'
+    loss_weight = 10  # 63.29 = 1/0.0158
+    optimizer = 'adam'
+
+    prop_train = 0.75
+    n_total = 500
+    n_train = prop_train * n_total
+    n_test = n_total - n_train
+
+    batch_size = 10
+    n_epochs = 10
+    k = 1  # Visualize the model predictions on the fixed set every k epochs
+
+    args = {
+        'model': model_name,
+        'learning_rate': learning_rate,
+        'loss_fn': loss_fn,
+        'loss_weight': loss_weight,
+        'optimizer': optimizer,
+        'n_train': n_train,
+        'batch_size': batch_size,
+        'n_epochs': n_epochs,
+        'k': k
+    }
+
+    n_batches = int((n_train / batch_size) * n_epochs)
+    print(f'Total number of train batches: {n_batches}')
+"""
+
+
+
+parser = argparse.ArgumentParser(description='Training UNet')
+parser.add_argument('--proj', default='unet_test', type=str, help='project name')
+parser.add_argument('--n_total', default=2000, type=int, help='num. of total images')
+parser.add_argument('--n_train', default=350, type=int, help='num. of training images')
+parser.add_argument('--batch_size', default=10, type=int)
+parser.add_argument('--k', default=1, type=int, help="log every k batches")
+
+
+parser.add_argument('--model_name', metavar='ARCH', default='pretrained_unet')
+# parser.add_argument('--pretrained', type=str, default=None, help='local path to pretrained model state dict (optional)')
+# parser.add_argument('--width', default=None, type=int, help="architecture width parameter (optional)")
+parser.add_argument('--loss_fn', default='BCEWithLogitsLoss', choices=['BCEWithLogitsLoss', 'DICELoss'],
+                    type=str)
+parser.add_argument('--loss_weight', default=10.0, type=float,
+                    help='positive class weight for BCEWithLogitsLoss')
+
+parser.add_argument('--optimizer', default="adam", type=str)
+parser.add_argument('--learning_rate', default=0.1, type=float, help='initial learning rate')
+parser.add_argument('--scheduler', default="cosine", type=str, help='lr scheduler')
+
+parser.add_argument('--n_epochs', default=2, type=int)
+# for keeping the same LR sched across different samp sizes.
+# parser.add_argument('--nbatches', default=None, type=int, help='Total num. batches to train for. If specified, overrides EPOCHS.')
+# parser.add_argument('--batches_per_lr_step', default=390, type=int)
+
+parser.add_argument('--momentum', default=0.0, type=float, help='momentum (0 or 0.9)')
+parser.add_argument('--wd', default=0.0, type=float, help='weight decay')
+
+parser.add_argument('--workers', default=4, type=int, help='number of data loading workers')
+# parser.add_argument('--half', default=False, action='store_true', help='training with half precision')
+# parser.add_argument('--fast', default=False, action='store_true', help='do not log more frequently in early stages')
+parser.add_argument('--earlystop', default=False, action='store_true', help='stop when train loss < 0.01')
+
+args = parser.parse_args()
+
 
 def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred, alpha=1.0, save_path=None):
     """
@@ -185,7 +258,7 @@ def test_all(loader, model, loss_fn):
 
 
 def main():
-
+    """
     # In the future, we will pass these as command line arguments
     model_name = 'pretrained_unet'
     learning_rate = 3e-4
@@ -201,7 +274,7 @@ def main():
 
     batch_size = 10
     n_epochs = 10
-    k = 5  # Visualize the model predictions on the fixed set every k epochs
+    k = 1  # Visualize the model predictions on the fixed set every k epochs
 
     args = {
         'model': model_name,
@@ -214,8 +287,202 @@ def main():
         'n_epochs': n_epochs,
         'k': k
     }
+    """
+    n_batches = int((args.n_train / args.batch_size) * args.n_epochs)
+    print(f'Total number of train batches: {n_batches}')
 
-    n_batches = int((n_train / batch_size) * n_epochs)
+    vis_images = [
+        ('1.2.840.114340.3.8251050064157.3.20190421.114851.4961.6_137.jpg', -1),
+        ('1.2.840.114340.3.48100021226225.3.20190816.202201.6283.4_39.jpg', -1),
+        ('1.2.840.114340.3.8251050064157.3.20180802.150631.1897.6_152.jpg', -1),
+        ('1.2.840.114340.3.8251050064157.3.20180425.145653.384.6_0.jpg', -1),
+        ('1.2.840.114340.3.48100016190144.3.20200705.200229.5904.4_0.jpg', -1),
+        ('1.2.840.114340.3.8251017179172.3.20141207.22903.11967.6_5.jpg', 1),
+        ('1.2.840.114340.3.8251017179172.3.20150128.164707.13073.6_79.jpg', 1),
+        ('1.2.840.114340.3.8251017179172.3.20140531.234055.7585.6_41.jpg', 1),
+        ('1.2.840.114340.3.48100016190144.3.20201005.183539.6271.4_0.jpg', 1),
+        ('1.2.840.114340.3.8251017179172.3.20150413.183009.15018.6_53.jpg', 1)
+    ]
+
+    vis_images = [img[0] for img in vis_images]
+
+    # Temporary list of randomly-drawn vis images for grant proposal. Will remove later.
+    # vis_images = [vis_images[0], vis_images[-1]]
+
+    if torch.cuda.is_available():
+        print(f'CUDA available. Using GPU.')
+    else:
+        print('CUDA is not available. Try again with a GPU. Exiting...')
+        exit(1)
+
+    config = load_config()
+
+    # Change this to get the directory from the config file
+    data_dir = config['data_dir']
+    logging_dir = config['logging_dir']
+
+    # WandB setup
+    os.environ['WANDB_API_KEY'] = config['wandb_api_key']
+    wandb.init(project=args.proj, entity=config['wandb_entity'])
+    wandb.config.update(args)
+
+    project_dir = os.path.join(logging_dir, args.proj)
+    if not os.path.exists(project_dir): os.makedirs(project_dir)
+
+    run_dir = os.path.join(project_dir, f"{wandb.run.name}-{wandb.run.id}")
+    if not os.path.exists(run_dir): os.makedirs(run_dir)
+
+    fig_dir = os.path.join(run_dir, 'segmentation_overlays')
+    if not os.path.exists(fig_dir): os.makedirs(fig_dir)
+
+    # Create the datasets and dataloaders
+    img_dataset = FASTSegmentationDataset(data_dir, excluded_files=vis_images)
+    # img_dataset = FASTSegmentationDataset(data_dir)
+
+    n_total = min(len(img_dataset), args.n_total)
+    # n_train = int(prop_train * n_total)
+    n_test = n_total - args.n_train
+
+    dataset_train, dataset_test = torch.utils.data.random_split(img_dataset, [args.n_train, n_test])
+
+    loader_train = DataLoader(dataset_train, batch_size=min(args.n_train, args.batch_size), shuffle=True, num_workers=1)
+    loader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=True, num_workers=1)
+
+    # Create a separate dataset for the visualization images
+    vis_dataset = FASTSegmentationDataset(data_dir, included_files=vis_images)
+    loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
+
+    # Get the fixed set of images and masks for visualization
+    fixed_images, fixed_masks, fixed_free_fluid_labels = next(iter(loader_vis))
+
+    # Pad the images and masks to make them divisible by 32
+    fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
+    fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
+
+    fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
+
+    print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
+
+    model = get_model(model_name=args.model_name, in_channels=1, n_classes=1)
+    model.cuda()
+    trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
+    print(f"Total number of trainable parameters: {trainable_params}")
+
+    # init logging
+    logger = VanillaLogger(args, wandb, log_root=logging_dir, hash=True)
+
+    if args.loss_fn == 'BCEWithLogitsLoss':
+        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(args.loss_weight))
+    elif args.loss_fn == 'DICELoss':
+        criterion = DICELoss()
+    else:
+        raise ValueError(f'Invalid loss function: {args.loss_fn}. Only BCEWithLogitsLoss and DICELoss are supported.')
+    test_loss = None
+
+    optimizer = get_optimizer(optimizer_name=args.optimizer, model=model, learning_rate=args.learning_rate)
+    # scheduler =
+
+    print('Training...')
+    for epoch in range(args.n_epochs):
+        model.train()
+
+        for batch, (images, masks, free_fluid_labels) in enumerate(loader_train):
+            # torch.save(
+            #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
+            #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_unpadded_data_check.pth'
+            # ) ############ DELETE THIS LINE ############
+
+            model.train()
+
+            # Pad the images and masks to make them divisible by 32
+            images = pad_to_divisible_by_32(images, pad_value=-1.0)
+            masks = pad_to_divisible_by_32(masks, pad_value=0.0)
+
+            # torch.save(
+            #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
+            #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_data_check.pth'
+            # ) ############ DELETE THIS LINE ############
+
+            # break ############ DELETE THIS LINE ############
+
+            images, masks = images.cuda(), masks.cuda()
+
+            # Compute prediction error
+            pred = model(images)
+            loss = criterion(pred, masks)
+
+            # Backpropagation
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # break ############ DELETE THIS LINE ############
+
+        test_loss = test_all(loader_test, model, criterion)
+        print(f'[Epoch {epoch+1} of {args.n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
+        # wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
+
+        if (epoch+1) % args.k == 0:
+            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
+
+            d = {'epoch': epoch,
+                 'lr': args.learning_rate,
+                 'n': args.n_train,
+                 'train_loss': loss.item(),
+                 'test_loss': test_loss}
+
+            logger.log_scalars(d)
+            logger.flush()
+
+    ## Final logging
+    print('Saving model...')
+    logger.save_model(model)
+
+    summary = {}
+    summary.update({f'Final Test {args.k}': test_loss})
+    summary.update({f'Final Train {args.k}': loss.item()})
+
+    logger.log_summary(summary)
+    logger.flush()
+
+    print('Exiting...')
+
+    # wandb.finish()
+
+
+
+def old_main():
+    """
+    # In the future, we will pass these as command line arguments
+    model_name = 'pretrained_unet'
+    learning_rate = 3e-4
+    loss_fn = 'BCEWithLogitsLoss'
+    # loss_fn = 'DICELoss'
+    loss_weight = 10  # 63.29 = 1/0.0158
+    optimizer = 'adam'
+
+    prop_train = 0.75
+    n_total = 500
+    n_train = prop_train * n_total
+    n_test = n_total - n_train
+
+    batch_size = 10
+    n_epochs = 10
+    k = 1  # Visualize the model predictions on the fixed set every k epochs
+
+    args = {
+        'model': model_name,
+        'learning_rate': learning_rate,
+        'loss_fn': loss_fn,
+        'loss_weight': loss_weight,
+        'optimizer': optimizer,
+        'n_train': n_train,
+        'batch_size': batch_size,
+        'n_epochs': n_epochs,
+        'k': k
+    }
+    """
+    n_batches = int((args['n_train'] / args['batch_size']) * args['n_epochs'])
     print(f'Total number of train batches: {n_batches}')
 
     vis_images = [
@@ -257,8 +524,7 @@ def main():
     project_dir = os.path.join(logging_dir, proj_name)
     if not os.path.exists(project_dir): os.makedirs(project_dir)
 
-    wandb_run_name = wandb.run.name
-    run_dir = os.path.join(project_dir, wandb_run_name)
+    run_dir = os.path.join(project_dir, f"{wandb.run.name}-{wandb.run.id}")
     if not os.path.exists(run_dir): os.makedirs(run_dir)
 
     fig_dir = os.path.join(run_dir, 'segmentation_overlays')
@@ -268,14 +534,14 @@ def main():
     img_dataset = FASTSegmentationDataset(data_dir, excluded_files=vis_images)
     # img_dataset = FASTSegmentationDataset(data_dir)
 
-    n_total = len(img_dataset)
-    n_train = int(prop_train * n_total)
-    n_test = n_total - n_train
+    n_total = min(len(img_dataset), args['n_total'])
+    # n_train = int(prop_train * n_total)
+    n_test = n_total - args['n_train']
 
-    dataset_train, dataset_test = torch.utils.data.random_split(img_dataset, [n_train, n_test])
+    dataset_train, dataset_test = torch.utils.data.random_split(img_dataset, [args['n_train'], n_test])
 
-    loader_train = DataLoader(dataset_train, batch_size=min(n_train, batch_size), shuffle=True, num_workers=1)
-    loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=1)
+    loader_train = DataLoader(dataset_train, batch_size=min(args['n_train'], args['batch_size']), shuffle=True, num_workers=1)
+    loader_test = DataLoader(dataset_test, batch_size=args['batch_size'], shuffle=True, num_workers=1)
 
     # Create a separate dataset for the visualization images
     vis_dataset = FASTSegmentationDataset(data_dir, included_files=vis_images)
@@ -292,23 +558,26 @@ def main():
 
     print(f'You specified {len(vis_images)} visualization images. You ended up with {len(fixed_images)} images.')
 
-    model = get_model(model_name=model_name, in_channels=1, n_classes=1)
+    model = get_model(model_name=args['model_name'], in_channels=1, n_classes=1)
     model.cuda()
     trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
     print(f"Total number of trainable parameters: {trainable_params}")
 
-    if loss_fn == 'BCEWithLogitsLoss':
-        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(loss_weight))
-    elif loss_fn == 'DICELoss':
+    # init logging
+    logger = VanillaLogger(args, wandb, log_root = logging_dir, hash=True)
+
+    if args['loss_fn'] == 'BCEWithLogitsLoss':
+        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(args['loss_weight']))
+    elif args['loss_fn'] == 'DICELoss':
         criterion = DICELoss()
     else:
-        raise ValueError(f'Invalid loss function: {loss_fn}. Only BCEWithLogitsLoss and DICELoss are supported.')
+        raise ValueError(f'Invalid loss function: {args['loss_fn']}. Only BCEWithLogitsLoss and DICELoss are supported.')
 
-    optimizer = get_optimizer(optimizer_name=optimizer, model=model, learning_rate=learning_rate)
+    optimizer = get_optimizer(optimizer_name=args['optimizer'], model=args['model'], learning_rate=args['learning_rate'])
     # scheduler =
 
     print('Training...')
-    for epoch in range(n_epochs):
+    for epoch in range( args['n_epochs']):
         model.train()
 
         for batch, (images, masks, free_fluid_labels) in enumerate(loader_train):
@@ -344,18 +613,36 @@ def main():
         # break ############ DELETE THIS LINE ############
 
         test_loss = test_all(loader_test, model, criterion)
-        print(f'[Epoch {epoch+1} of {n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
-        wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
+        print(f'[Epoch {epoch+1} of { args['n_epochs']}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
+        # wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
 
 
-        if (epoch+1) % k == 0:
+        if (epoch+1) % args['k'] == 0:
             visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
 
+            d = {'epoch': epoch,
+                 'lr': args['learning_rate'],
+                 'n': args['n_train'],
+                 'train_loss': loss.item(),
+                 'test_loss': test_loss}
+
+            logger.log_scalars(d)
+            logger.flush()
+
+    ## Final logging
     print('Saving model...')
+    logger.save_model(model)
 
-    print('Model saved. Exiting...')
+    summary = {}
+    summary.update({f'Final Test {k}' : test_loss})
+    summary.update({f'Final Train {k}' : loss.item()})
 
-    wandb.finish()
+    logger.log_summary(summary)
+    logger.flush()
+
+    print('Exiting...')
+
+    # wandb.finish()
 
 
 if __name__ == '__main__':
