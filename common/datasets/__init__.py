@@ -126,7 +126,7 @@ class FASTSegmentationDataset(Dataset):
     DEFAULT_IMAGE_SIZE = (960, 720)
 
     def __init__(self, data_dir: str, resize: bool = True, transform=None, included_files=None,
-                 excluded_files=None):
+                 excluded_files=None, included_studies=None, excluded_studies=None):
         self.data_dir = data_dir
         self.transform = transform
         self.resize = resize
@@ -138,6 +138,10 @@ class FASTSegmentationDataset(Dataset):
             self.image_files = [f for f in self.image_files if f[0] in included_files]
         elif excluded_files:
             self.image_files = [f for f in self.image_files if f[0] not in excluded_files]
+        elif included_studies:
+            self.image_files = [f for f in self.image_files if f[4] in included_studies]
+        elif excluded_studies:
+            self.image_files = [f for f in self.image_files if f[4] not in excluded_studies]
 
         # List all files in directory and filter out segmentation label images
         # if included_files:
@@ -151,7 +155,7 @@ class FASTSegmentationDataset(Dataset):
         return len(self.image_files)
 
     def __getitem__(self, index):
-        img_name, free_fluid_label, _, _ = self.image_files[index]
+        img_name, free_fluid_label, _, _, study_id = self.image_files[index]
         label_name = img_name.rsplit('.', 1)[0] + '_Mask.jpg'
 
         img_path = os.path.join(self.data_dir, 'raw_images', img_name)

@@ -126,6 +126,7 @@ def convert_annotation_to_image_and_label(annotation, args):
     positive_label = interpret_free_fluid_label(args['LABEL_DICT'][annotation['labelId']])
     creator_id = annotation['createdById']
     dataset_name = annotation['dataset_name']
+    study_id = annotation['StudyInstanceUID']
 
     frame_width = annotation['width']
     frame_height = annotation['height']
@@ -145,7 +146,7 @@ def convert_annotation_to_image_and_label(annotation, args):
     image.save(os.path.join(args['IMAGE_DIR'], mask_image_filename))
     # image.save(f"/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/PIL_saved_mask.jpg")
 
-    return raw_image_filename, positive_label, creator_id, dataset_name
+    return raw_image_filename, positive_label, creator_id, dataset_name, study_id
 
 
 def process_annotations(annotations, args):
@@ -165,7 +166,8 @@ def process_annotations(annotations, args):
     #
     csv_filename = os.path.join(args['IMAGE_DIR'], "free_fluid_labels.csv")
     #
-    new_label_rows = pd.DataFrame(label_list, columns=['filename', 'free_fluid_label', 'creator_id', 'dataset_name'])
+    new_label_rows = pd.DataFrame(label_list,
+                                  columns=['filename', 'free_fluid_label', 'creator_id', 'dataset_name', 'study_id'])
     #
     if os.path.exists(csv_filename):
         # Load the existing data
