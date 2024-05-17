@@ -84,7 +84,8 @@ class DICELossV0(nn.Module):
         return dice_loss
 
 
-def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred, alpha=1.0, save_path=None):
+def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_pred, alpha=1.0,
+                                   binarize=True, cutoff=0.5, save_path=None):
     """
     Visualizes the segmentation overlay on top of the original image.
 
@@ -93,9 +94,16 @@ def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_p
         mask_tensor_true (torch.Tensor): The true mask tensor of shape [1, H, W], with 1s for the object.
         mask_tensor_pred (torch.Tensor, optional): The predicted mask tensor of shape [1, H, W], with 1s for the object.
         alpha (float): Opacity level of the mask overlay. Default is 0.3.
+        binarize (bool, optional): Whether to binarize the predicted mask values. Default is True.
+        cutoff (float, optional): Cutoff threshold for binarizing the predicted mask values. Default is 0.5.
         save_path (str, optional): Path to save the visualization. If None, the image is not saved.
     """
     mask_tensor_pred = torch.sigmoid(mask_tensor_pred)
+
+    if binarize:
+        # Binarize the predicted mask values based on the cutoff threshold
+        mask_tensor_pred = (mask_tensor_pred > cutoff).float()
+
 
     # Ensure the orignal image and the masks are numpy arrays
     image = image_tensor.detach().squeeze().cpu().numpy()
@@ -145,7 +153,7 @@ def visualize_segmentation_overlay(image_tensor, mask_tensor_true, mask_tensor_p
     plt.close()
 
 
-def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
+def visualize_fixed_set(model, images, masks, epoch, batch, save_dir, binarize=True, cutoff=0.5):
     """
     Visualizes the segmentation mask overlay on the original image for a fixed set of images and masks.
     Parameters:
@@ -155,6 +163,8 @@ def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
         epoch: The current epoch.
         batch: The current batch.
         save_dir: The directory to save the visualizations.
+        binarize: Whether to binarize the predicted masks.
+        cutoff: The cutoff threshold for binarizing the predicted masks.
     """
     model.eval()
     with torch.no_grad():
@@ -162,7 +172,8 @@ def visualize_fixed_set(model, images, masks, epoch, batch, save_dir):
     for i in range(len(images)):
         save_path = os.path.join(save_dir, f'epoch_{epoch}_batch_{batch}_image_{i}')
         visualize_segmentation_overlay(image_tensor=images[i], mask_tensor_true=masks[i],
-                                       mask_tensor_pred=pred_masks[i], save_path=save_path)
+                                       mask_tensor_pred=pred_masks[i], binarize=binarize,
+                                       cutoff=cutoff, save_path=save_path)
     model.train()
 
 
@@ -233,14 +244,42 @@ def test_all(loader, model, loss_fn):
     model.eval()
     test_loss = 0
     with torch.no_grad():
-        for batch, (images, masks, free_fluid_labels) in enumerate(loader):
+        for batch, (images, masks, free_fluid_labels, _) in enumerate(loader):
             # Pad the images and masks to make them divisible by 32
             images = pad_to_divisible_by_32(images, pad_value=-1.0)
             masks = pad_to_divisible_by_32(masks, pad_value=0.0)
 
             images, masks = images.cuda(), masks.cuda()
             pred = model(images)
+            pred = torch.sigmoid(pred)
             test_loss += loss_fn(pred, masks).item()
     test_loss /= num_batches
 
     return test_loss
+
+
+def evaluate_and_save_outputs(model, data_loader, output_dir, device, binarize=False, cutoff=0.5):
+    # FUNCTION NOT READY. Needs to keep track of filenames and save them in the output_dir
+    # This is pretty much raw AI output and has not been checked.
+
+    model.eval()
+    os.makedirs(output_dir, exist_ok=True)
+    with torch.no_grad():
+        for images, masks, free_fluid_labels, image_files in data_loader:
+            images = pad_to_divisible_by_32(images, pad_value=-1.0)
+            images = images.to(device)
+            pred_masks = model(images)
+            pred_masks = torch.sigmoid(pred_masks)
+            if binarize:
+                pred_masks = (pred_masks > cutoff).float()
+            for j in range(len(images)):
+                image_file = image_files[j]
+                output_name = image_file.split('.jpg')[0] + '_Mask_Pred.jpg'
+                # output_prefix = os.path.splitext(os.path.basename(image_file))[0]
+                # image = images[j].cpu().numpy().squeeze()
+                # true_mask = masks[j].cpu().numpy().squeeze()
+                pred_mask = pred_masks[j].cpu().numpy().squeeze()
+                plt.imsave(os.path.join(output_dir, output_name), pred_mask, cmap='gray')
+                # np.save(os.path.join(output_dir, f'{output_prefix}_image.npy'), image)
+                # np.save(os.path.join(output_dir, f'{output_prefix}_true_mask.npy'), true_mask)
+                # np.save(os.path.join(output_dir, f'{output_prefix}_pred_mask.npy'), pred_mask)

@@ -20,7 +20,7 @@ import sys
 
 from experiments.utils import load_config, DICELoss
 from common.datasets import FASTSegmentationDataset
-from experiments.utils import get_optimizer, get_model, test_all
+from experiments.utils import get_optimizer, get_model, test_all, evaluate_and_save_outputs
 from experiments.utils import visualize_segmentation_overlay, visualize_fixed_set, pad_to_divisible_by_32
 
 from common.logging import VanillaLogger
@@ -44,7 +44,7 @@ parser.add_argument('--loss_weight', default=10.0, type=float,
                     help='positive class weight for BCEWithLogitsLoss')
 
 parser.add_argument('--optimizer', default="adam", type=str)
-parser.add_argument('--learning_rate', default=0.1, type=float, help='initial learning rate')
+parser.add_argument('--learning_rate', default=0.0003, type=float, help='initial learning rate')
 parser.add_argument('--scheduler', default="cosine", type=str, help='lr scheduler')
 
 parser.add_argument('--n_epochs', default=2, type=int)
@@ -59,7 +59,8 @@ parser.add_argument('--workers', default=1, type=int, help='number of data loadi
 # parser.add_argument('--half', default=False, action='store_true', help='training with half precision')
 # parser.add_argument('--fast', default=False, action='store_true', help='do not log more frequently in early stages')
 parser.add_argument('--earlystop', default=False, action='store_true', help='stop when train loss < 0.01')
-parser.add_argument('--model_saving_off', default=True, action='store_false', help='Do not save model after training')
+parser.add_argument('--model_saving', default=False, action='store_true', help='Save model after training')
+parser.add_argument('--output_saving', default=False, action='store_true', help='Save outputs after training')
 
 
 args = parser.parse_args()
@@ -96,6 +97,9 @@ def main():
     fig_dir = os.path.join(run_dir, 'segmentation_overlays')
     if not os.path.exists(fig_dir): os.makedirs(fig_dir)
 
+    output_dir = os.path.join(config['output_dir'], args.proj, f"{wandb.run.name}-{wandb.run.id}")
+    if not os.path.exists(output_dir): os.makedirs(output_dir)
+
     # Create the datasets and dataloaders
     dataset_train = FASTSegmentationDataset(data_dir, included_studies=config['TRAIN_STUDIES'])
     dataset_val = FASTSegmentationDataset(data_dir, included_studies=config['VAL_STUDIES'])
@@ -116,7 +120,7 @@ def main():
     loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
 
     # Get the fixed set of images and masks for visualization
-    fixed_images, fixed_masks, fixed_free_fluid_labels = next(iter(loader_vis))
+    fixed_images, fixed_masks, fixed_free_fluid_labels, _ = next(iter(loader_vis))
 
     # Pad the images and masks to make them divisible by 32
     fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
@@ -152,7 +156,7 @@ def main():
     for epoch in range(args.n_epochs):
         model.train()
 
-        for batch, (images, masks, free_fluid_labels) in enumerate(loader_train):
+        for batch, (images, masks, free_fluid_labels, _) in enumerate(loader_train):
             # torch.save(
             #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
             #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_unpadded_data_check.pth'
@@ -175,12 +179,14 @@ def main():
 
             # Compute prediction error
             pred = model(images)
+            pred = torch.sigmoid(pred)
             loss = criterion(pred, masks)
 
             # Backpropagation
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+
 
         # break ############ DELETE THIS LINE ############
 
@@ -191,7 +197,7 @@ def main():
                 f'[Epoch {epoch + 1} of {args.n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
             # wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
 
-            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir)
+            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir, binarize=False, cutoff=0.5)
 
             d = {'epoch': epoch,
                  'lr': args.learning_rate,
@@ -203,7 +209,7 @@ def main():
             logger.flush()
 
     ## Final logging
-    if args.model_saving_off:
+    if args.model_saving:
         print('Saving model...')
         logger.save_model(model)
 
@@ -213,6 +219,15 @@ def main():
 
     logger.log_summary(summary)
     logger.flush()
+
+    if args.output_saving:
+        print('Evaluating on training set and saving outputs...')
+        train_output_dir = os.path.join(output_dir, 'train')
+        evaluate_and_save_outputs(model, loader_train, train_output_dir, device='cuda')
+
+        print('Evaluating on test set and saving outputs...')
+        test_output_dir = os.path.join(output_dir, 'test')
+        evaluate_and_save_outputs(model, loader_test, test_output_dir, device='cuda')
 
     print('Exiting...')
 

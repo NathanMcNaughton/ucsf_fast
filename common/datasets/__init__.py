@@ -206,4 +206,4 @@ class FASTSegmentationDataset(Dataset):
             image = self.transform(image)
             label = self.transform(label)
 
-        return image, label, free_fluid_label
+        return image, label, free_fluid_label, img_name
