@@ -6,7 +6,7 @@ import shutil
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from PIL import Image as PILImage
+from PIL import Image
 from PIL import ImageDraw
 # from wand.image import Image
 # from wand.drawing import Drawing
@@ -14,8 +14,16 @@ from PIL import ImageDraw
 # from scipy.ndimage import binary_fill_holes
 from datetime import datetime
 from collections import Counter, deque, defaultdict
+import torch
+from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
-from experiments.utils import load_config
+import sys
+root_dir = '/accounts/campus/austin.zane/ucsf_fast'
+sys.path.append(root_dir)
+os.chdir(root_dir)
+
+from experiments.utils import load_config, pad_to_divisible_by_32
 
 
 def interpret_free_fluid_label(label_name):
@@ -140,7 +148,7 @@ def convert_annotation_to_image_and_label(annotation, args):
     # Reshape the flattened array into (length_list, 2)
     list_in = flattened_array.reshape((length_list, 2))
 
-    image = PILImage.new('RGB', (frame_width, frame_height), color='black')
+    image = Image.new('RGB', (frame_width, frame_height), color='black')
     draw = ImageDraw.Draw(image)
     draw.polygon(list_in.flatten().tolist(), fill='white', outline='white', width=2)
     image.save(os.path.join(args['IMAGE_DIR'], mask_image_filename))
@@ -347,13 +355,127 @@ def collect_and_rename_images(updated_rows, args):
     for f in file_names_no_match:
         print(f)
 
-    # All of the masks with no matching raw number have 0 index. Could be a much larger problem.
+    return None
+
+
+def preprocess_images_and_masks(args, split='train'):
+    """
+    This function preprocesses the images and masks.
+    :param args:
+    :param split:
+    :return:
+
+    Outline:
+    1. Load the images and masks
+    2. Resize the images and masks
+    3. Convert the images and masks to tensors
+    4. Pad them so that they are divisible by 32
+    """
+    print(f'Preprocessing images and masks for {split} split.')
+
+    if split == 'train':
+        selected_studies = args['TRAIN_STUDIES']
+    elif split == 'val':
+        selected_studies = args['VAL_STUDIES']
+    elif split == 'test':
+        selected_studies = args['TEST_STUDIES']
+    else:
+        raise ValueError(f"Split {split} not recognized. Must be 'train', 'val', or 'test'.")
+    selected_studies = set(selected_studies)
+
+    # Directory for the current split
+    split_dir = os.path.join(args['IMAGE_DIR'], split)
+    split_image_dir = os.path.join(split_dir, 'images')
+    split_mask_dir = os.path.join(split_dir, 'masks')
+    os.makedirs(split_dir, exist_ok=True)
+    os.makedirs(split_image_dir, exist_ok=True)
+    os.makedirs(split_mask_dir, exist_ok=True)
+
+    # Use the csv file to select rows with the selected studies
+    csv_filename = os.path.join(args['IMAGE_DIR'], "free_fluid_labels.csv")
+    label_rows = pd.read_csv(csv_filename)
+    selected_rows = label_rows[label_rows['study_id'].isin(selected_studies)]
+
+    # Get set of study_id for rows that have free_fluid_label == 1
+    positive_studies = set(selected_rows[selected_rows['free_fluid_label'] == 1]['study_id'])
+    negative_studies = set(selected_rows[selected_rows['free_fluid_label'] == -1]['study_id'])
+    intersect_studies = positive_studies.intersection(negative_studies)
+
+    # Exclude rows that have free_fluid_label == -1 and study_id in intersect_studies
+    selected_rows = selected_rows[~((selected_rows['free_fluid_label'] == -1) & (selected_rows['study_id'].isin(intersect_studies)))]
+
+    # Exclude rows with filenames that start with 1.2.840.114340.3.48100016190144.3.20201005.183539.6271.4 before the first underscore
+    selected_rows = selected_rows[~selected_rows['filename'].str.startswith('1.2.840.114340.3.48100016190144.3.20201005.183539.6271.4_')]
+
+    # Load the images and masks that remain in selected_rows
+    image_dir = os.path.join(args['IMAGE_DIR'], 'raw_images')
+    mask_dir = os.path.join(args['IMAGE_DIR'], 'masks')
+
+    DEFAULT_IMAGE_SIZE = (960, 720)
+
+    for _, row in selected_rows.iterrows():
+        image_path = os.path.join(image_dir, row['filename'])
+        mask_path = os.path.join(mask_dir, row['filename'].replace('.jpg', '_Mask.jpg'))
+
+        try:
+            image = Image.open(image_path).convert('L')
+        except IOError as e:
+            raise RuntimeError(f'Error opening raw image: {e}')
+
+        try:
+            mask = Image.open(mask_path).convert('L')
+        except IOError as e:
+            raise RuntimeError(f'Error opening mask annotation: {e}')
+
+        if image.size != mask.size:
+            raise RuntimeError(f'Image and mask annotation have different dimensions: {row['filename']}. Image: {image.size}, Mask: {mask.size}')
+
+        # Check for images that are not default size
+        if image.size != DEFAULT_IMAGE_SIZE:
+            # For images, use bilinear interpolation
+            img_resize_transform = transforms.Resize(
+                size=(DEFAULT_IMAGE_SIZE[1], DEFAULT_IMAGE_SIZE[0]),
+                interpolation=InterpolationMode.BILINEAR
+            )
+            # For labels, use nearest neighbor interpolation to avoid introducing non-binary values
+            mask_resize_transform = transforms.Resize(
+                size=(DEFAULT_IMAGE_SIZE[1], DEFAULT_IMAGE_SIZE[0]),
+                interpolation=InterpolationMode.NEAREST
+            )
+            image = img_resize_transform(image)
+            mask = mask_resize_transform(mask)
+
+        # Define transformations for the images. Namely, convert to tensor and normalize.
+        img_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5], std=[0.5])
+        ])
+        # Define transformations for the labels. Namely, convert to tensor.
+        mask_transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+
+        image = img_transform(image)
+        mask = mask_transform(mask)
+
+        # print(f'Image shape: {image.shape}, Mask shape: {mask.shape}')
+
+        # Pad the image and mask to be divisible by 32
+        image = pad_to_divisible_by_32(image, pad_value=-1.0)
+        mask = pad_to_divisible_by_32(mask, pad_value=0.0)
+
+        # Save the image and mask
+        torch.save(image, os.path.join(split_image_dir, row['filename'].replace('.jpg', '.pt')))
+        torch.save(mask, os.path.join(split_mask_dir, row['filename'].replace('.jpg', '_Mask.pt')))
 
     return None
 
-#######################
-# Debugging functions #
-#######################
+
+
+
+#################################
+### Begin debugging functions ###
+#################################
 
 def investigate_indexing_mismatch():
     mask_file_names = os.listdir('/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/masks')
@@ -433,6 +555,11 @@ def print_dict(d, indent=0):
             print('\t' * (indent+1) + str(value))
 
 
+###############################
+### End debugging functions ###
+###############################
+
+
 def main():
 
     mdai_args = load_config()
@@ -444,6 +571,9 @@ def main():
     collect_and_rename_images(updated_rows, mdai_args)
     #
     # print(updated_rows)
+    #
+    for split in ['train', 'val', 'test']:
+        preprocess_images_and_masks(mdai_args, split=split)
     #
     return 0
 

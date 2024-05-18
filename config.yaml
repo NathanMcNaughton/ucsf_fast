@@ -9,10 +9,10 @@ logging_dir: 'YOUR_LOGGING_DIR'
 DOMAIN: "ucsf.md.ai"
 PROJECT_ID: "7YNd8LNb"
 DATASET_IDS: [
-    "D_pQ7xYz",
-    "D_aQB9GJ",
-    "D_rVgbwz",
-    "D_QdRe2V"
+#     "D_pQ7xYz",  # Positive Classification (Full Study - A)
+    "D_aQB9GJ",  # Positive Classification (RUQ)
+#     "D_rVgbwz",  # Positive Classification (Pelvic)
+    "D_QdRe2V",  # Positive Classification (Full Study - B)
 ]
 ACCESS_TOKEN: "YOUR_MDAI_ACCESS_TOKEN"
     # Can get your own token from https://ucsf.md.ai/hub/settings?tab=tokens
