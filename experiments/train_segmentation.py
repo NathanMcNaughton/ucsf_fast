@@ -33,6 +33,8 @@ parser.add_argument('--n_total', default=2000, type=int, help='num. of total ima
 parser.add_argument('--n_train', default=350, type=int, help='num. of training images')
 parser.add_argument('--batch_size', default=10, type=int)
 parser.add_argument('--k', default=1, type=int, help="log every k epochs")
+parser.add_argument('--binarize', default=False, action='store_true', help='Force output to be binary')
+parser.add_argument('--cutoff', default=0.5, type=float, help='Threshold for binarizing output')
 
 
 parser.add_argument('--model_name', metavar='ARCH', default='pretrained_unet')
@@ -70,8 +72,6 @@ args = parser.parse_args()
 def main():
     config = load_config()
 
-    vis_images = config['VIS_IMAGES']
-
     if torch.cuda.is_available():
         print(f'CUDA available. Using GPU.')
     else:
@@ -100,36 +100,23 @@ def main():
     output_dir = os.path.join(config['output_dir'], args.proj, f"{wandb.run.name}-{wandb.run.id}")
     if not os.path.exists(output_dir): os.makedirs(output_dir)
 
-    # Create the datasets and dataloaders
-    dataset_train = FASTSegmentationDataset(data_dir, included_studies=config['TRAIN_STUDIES'])
-    dataset_val = FASTSegmentationDataset(data_dir, included_studies=config['VAL_STUDIES'])
-    dataset_test = FASTSegmentationDataset(data_dir, included_studies=config['TEST_STUDIES'])
-
-    # n_total = min(len(img_dataset), args.n_total)
-    # n_train = int(prop_train * n_total)
-    # n_test = n_total - args.n_train
-
-    # dataset_train, dataset_test = torch.utils.data.random_split(img_dataset, [args.n_train, n_test])
+    dataset_train = FASTSegmentationDataset(data_dir, split='train')
+    dataset_val = FASTSegmentationDataset(data_dir, split='val')
+    dataset_test = FASTSegmentationDataset(data_dir, split='test')
+    dataset_vis = FASTSegmentationDataset(data_dir, split='test', included_files=config['VIS_IMAGES'])
 
     loader_train = DataLoader(dataset_train, batch_size=min(len(dataset_train), args.batch_size), shuffle=True, num_workers=args.workers)
     loader_val = DataLoader(dataset_val, batch_size=min(len(dataset_val), args.batch_size), shuffle=True, num_workers=1)
     loader_test = DataLoader(dataset_test, batch_size=min(len(dataset_test), args.batch_size), shuffle=True, num_workers=1)
-
-    # Create a separate dataset for the visualization images
-    vis_dataset = FASTSegmentationDataset(data_dir, included_files=vis_images)
-    loader_vis = DataLoader(vis_dataset, batch_size=len(vis_dataset), shuffle=False, num_workers=1)
+    loader_vis = DataLoader(dataset_vis, batch_size=len(dataset_vis), shuffle=False, num_workers=1)
 
     # Get the fixed set of images and masks for visualization
-    fixed_images, fixed_masks, fixed_free_fluid_labels, _ = next(iter(loader_vis))
-
-    # Pad the images and masks to make them divisible by 32
-    fixed_images = pad_to_divisible_by_32(fixed_images, pad_value=-1.0)
-    fixed_masks = pad_to_divisible_by_32(fixed_masks, pad_value=0.0)
+    fixed_images, fixed_masks, _ = next(iter(loader_vis))
 
     fixed_images, fixed_masks = fixed_images.cuda(), fixed_masks.cuda()
     print(f'Number of training images: {len(dataset_train)}')
     print(f'Number of validation images: {len(dataset_val)}')
-    print(f'Number of visualization images: {len(vis_dataset)}')
+    print(f'Number of visualization images: {len(dataset_vis)}')
 
     model = get_model(model_name=args.model_name, in_channels=1, n_classes=1)
     model.cuda()
@@ -156,30 +143,13 @@ def main():
     for epoch in range(args.n_epochs):
         model.train()
 
-        for batch, (images, masks, free_fluid_labels, _) in enumerate(loader_train):
-            # torch.save(
-            #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
-            #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_unpadded_data_check.pth'
-            # ) ############ DELETE THIS LINE ############
-
+        for batch, (images, masks, _) in enumerate(loader_train):
             model.train()
-
-            # Pad the images and masks to make them divisible by 32
-            images = pad_to_divisible_by_32(images, pad_value=-1.0)
-            masks = pad_to_divisible_by_32(masks, pad_value=0.0)
-
-            # torch.save(
-            #     {'images': images, 'masks': masks, 'free_fluid_labels': free_fluid_labels},
-            #     '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison/debugging/training_loop_data_check.pth'
-            # ) ############ DELETE THIS LINE ############
-
-            # break ############ DELETE THIS LINE ############
 
             images, masks = images.cuda(), masks.cuda()
 
             # Compute prediction error
             pred = model(images)
-            pred = torch.sigmoid(pred)
             loss = criterion(pred, masks)
 
             # Backpropagation
@@ -187,17 +157,13 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
 
-
-        # break ############ DELETE THIS LINE ############
-
-
         if (epoch+1) % args.k == 0:
             test_loss = test_all(loader_val, model, criterion)
             print(
-                f'[Epoch {epoch + 1} of {args.n_epochs}] \t  Training loss: {loss.item()}. \t Test loss: {test_loss}.')
-            # wandb.log({'train_loss': loss.item(), 'test_loss': test_loss})
+                f'[Epoch {epoch + 1} of {args.n_epochs}] \t  Training loss: {loss.item()}. \t Val loss: {test_loss}.')
 
-            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir, binarize=False, cutoff=0.5)
+            visualize_fixed_set(model, fixed_images, fixed_masks, epoch, batch, fig_dir,
+                                binarize=args.binarize, cutoff=args.cutoff)
 
             d = {'epoch': epoch,
                  'lr': args.learning_rate,
@@ -223,16 +189,15 @@ def main():
     if args.output_saving:
         print('Evaluating on training set and saving outputs...')
         train_output_dir = os.path.join(output_dir, 'train')
-        evaluate_and_save_outputs(model, loader_train, train_output_dir, device='cuda')
+        evaluate_and_save_outputs(model, loader_train, train_output_dir,
+                                  binarize=args.binarize, cutoff=args.cutoff, device='cuda')
 
-        print('Evaluating on test set and saving outputs...')
-        test_output_dir = os.path.join(output_dir, 'test')
-        evaluate_and_save_outputs(model, loader_test, test_output_dir, device='cuda')
+        print('Evaluating on val set and saving outputs...')
+        val_output_dir = os.path.join(output_dir, 'val')
+        evaluate_and_save_outputs(model, loader_val, val_output_dir,
+                                  binarize=args.binarize, cutoff=args.cutoff, device='cuda')
 
     print('Exiting...')
-
-    # wandb.finish()
-
 
 
 if __name__ == '__main__':

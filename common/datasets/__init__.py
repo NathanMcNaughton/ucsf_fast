@@ -1,10 +1,11 @@
 import os
 import torch
+import pandas as pd
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from PIL import Image
 import numpy as np
 from torchvision import transforms
-from torchvision.transforms import InterpolationMode
+from typing import Optional, List
 
 
 class TransformingTensorDataset(Dataset):
@@ -109,101 +110,65 @@ class TransformingTensorDataset(Dataset):
 
 class FASTSegmentationDataset(Dataset):
     """
-    This dataset should return a raw image, a segmentation label image, and a free fluid label.
-    The CSV file should essentially have all of that information, so that will be the starting point.
+        A PyTorch dataset for image segmentation tasks, specifically designed for the FAST
+        (Free-breathing Abdominal Segmentation Technique) dataset.
 
-    I will wait a sec to implement the "included_images" and "excluded_images" options.
+        This dataset loads images and their corresponding segmentation masks from a specified directory. It supports
+        data splitting (e.g., train, validation, test) and optional filtering of image files based on a provided list
+        of included files.
 
-    This class defaults to resizing the images when they have irregular dimensions.
-    If the option is turned off and this class is used with torch.utils.data.DataLoader,
-    there will likely be errors when PyTorch tries to stack the images in a batch.
+        The dataset assumes that the images and masks are stored in separate subdirectories within the specified data
+        directory. The image files are expected to have a '.pt' extension, while the mask files should have
+        a '_Mask.pt' suffix.
 
-    Attributes:
-        data_dir (str): Directory with image files.
-        resize (bool): Flag to resize images to a standard size if they don't match.
-        transform (torchvision.transforms): Transformations to be applied to the images and the masks.
-    """
-    DEFAULT_IMAGE_SIZE = (960, 720)
+        Args:
+            data_dir (str): The root directory containing the image and mask subdirectories.
+            transform (Optional[transforms.Compose], optional): A composition of image transformations to be applied to
+            both the images and masks. Defaults to None.
+            split (str, optional): The data split to use (e.g., 'train', 'val', 'test'). Defaults to 'train'.
+            included_files (Optional[List[str]], optional): A list of image file names to include in the dataset. If
+            provided, only the specified files will be included. Defaults to None.
 
-    def __init__(self, data_dir: str, resize: bool = True, transform=None, included_files=None,
-                 excluded_files=None, included_studies=None, excluded_studies=None):
-        self.data_dir = data_dir
+        Raises:
+            RuntimeError: If there is an error opening an image or mask file.
+
+        Returns:
+            tuple: A tuple containing the loaded image and its corresponding segmentation mask.
+        """
+    def __init__(self, data_dir: str, transform: Optional[transforms.Compose] = None, split: str = 'train',
+                 included_files: Optional[List[str]] = None):
+        # data_dir = '/scratch/users/austin.zane/ucsf_fast/data/labeled_fast_morison'
+
+        self.data_dir = os.path.join(data_dir, split)
         self.transform = transform
-        self.resize = resize
-        self.image_files = np.genfromtxt(os.path.join(data_dir, 'free_fluid_labels.csv'),
-                                 delimiter=',', names=True, dtype=None, encoding=None)
-        # The following lines allow us to specify a small subset of images to use for visualization throuhout training
-        # These images should not be included in the training or testing data.
-        if included_files:
-            self.image_files = [f for f in self.image_files if f[0] in included_files]
-        elif excluded_files:
-            self.image_files = [f for f in self.image_files if f[0] not in excluded_files]
-        elif included_studies:
-            self.image_files = [f for f in self.image_files if f[4] in included_studies]
-        elif excluded_studies:
-            self.image_files = [f for f in self.image_files if f[4] not in excluded_studies]
+        self.image_files = os.listdir(os.path.join(self.data_dir, 'images'))
 
-        # List all files in directory and filter out segmentation label images
-        # if included_files:
-        #     self.image_files = [f for f in included_files if
-        #                         not '_Morison' in f and f.endswith('.png') and f in os.listdir(data_dir)]
-        # else:
-        #     self.image_files = [f for f in os.listdir(data_dir) if
-        #                         not '_Morison' in f and f.endswith('.png') and f not in excluded_files]
+        if included_files:
+            self.image_files = [f for f in self.image_files if f.replace('.pt', '.jpg') in included_files]
 
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, index):
-        img_name, free_fluid_label, _, _, study_id = self.image_files[index]
-        label_name = img_name.rsplit('.', 1)[0] + '_Mask.jpg'
+        image_name = self.image_files[index]
+        mask_name = image_name.replace('.pt', '_Mask.pt')
 
-        img_path = os.path.join(self.data_dir, 'raw_images', img_name)
-        label_path = os.path.join(self.data_dir, 'masks', label_name)
-
-        try:
-            image = Image.open(img_path).convert('L')
-        except IOError as e:
-            raise RuntimeError(f'Error opening raw image: {e}')
+        image_path = os.path.join(self.data_dir, 'images', image_name)
+        mask_path = os.path.join(self.data_dir, 'masks', mask_name)
 
         try:
-            label = Image.open(label_path).convert('L')
+            image = torch.load(image_path)
+            mask = torch.load(mask_path)
         except IOError as e:
-            raise RuntimeError(f'Error opening mask annotation: {e}')
-
-        if image.size != label.size:
-            raise RuntimeError(f'Image and mask annotation have different dimensions: {img_name}. Image: {image.size}, Mask: {label.size}')
-
-        # Check for images that are not default size
-        if self.resize and image.size != self.DEFAULT_IMAGE_SIZE:
-            # For images, use bilinear interpolation
-            img_resize_transform = transforms.Resize(
-                size=(self.DEFAULT_IMAGE_SIZE[1], self.DEFAULT_IMAGE_SIZE[0]),
-                interpolation=InterpolationMode.BILINEAR
-            )
-            # For labels, use nearest neighbor interpolation to avoid introducing non-binary values
-            label_resize_transform = transforms.Resize(
-                size=(self.DEFAULT_IMAGE_SIZE[1], self.DEFAULT_IMAGE_SIZE[0]),
-                interpolation=InterpolationMode.NEAREST
-            )
-            image = img_resize_transform(image)
-            label = label_resize_transform(label)
-
-        # Define transformations for the images. Namely, convert to tensor and normalize.
-        img_transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5])
-        ])
-        # Define transformations for the labels. Namely, convert to tensor.
-        label_transform = transforms.Compose([
-            transforms.ToTensor()
-        ])
-
-        image = img_transform(image)
-        label = label_transform(label)
+            raise RuntimeError(f'Error opening image: {e}')
 
         if self.transform:
             image = self.transform(image)
-            label = self.transform(label)
+            mask = self.transform(mask)
 
-        return image, label, free_fluid_label, img_name
+        return image, mask, image_name
+
+
+# class FASTClassificationDataset(Dataset):
+
+

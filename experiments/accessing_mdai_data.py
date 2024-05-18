@@ -19,9 +19,9 @@ from torchvision import transforms
 from torchvision.transforms import InterpolationMode
 
 import sys
-root_dir = '/accounts/campus/austin.zane/ucsf_fast'
-sys.path.append(root_dir)
-os.chdir(root_dir)
+# root_dir = '/accounts/campus/austin.zane/ucsf_fast'
+# sys.path.append(root_dir)
+# os.chdir(root_dir)
 
 from experiments.utils import load_config, pad_to_divisible_by_32
 

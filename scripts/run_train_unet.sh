@@ -7,7 +7,7 @@
 #
 #SBATCH -p yugroup
 #SBATCH --gres=gpu:1
-#SBATCH -t 03:00:00       # set maximum run time in H:M:S
+#SBATCH -t 04:30:00       # set maximum run time in H:M:S
 
 
 source /usr/local/linux/mambaforge-3.11/bin/activate ucsf_env
@@ -15,10 +15,10 @@ cd /accounts/campus/austin.zane/ucsf_fast
 
 python \
     -m experiments.train_segmentation \
-    --proj unet_test_05_16_24 \
+    --proj unet_test_05_17_24 \
     --k 5 \
     --output_saving \
-    --n_epochs 100 \
+    --n_epochs 200 \
     --batch_size 10 \
     --loss_weight 10 \
     --learning_rate 0.0003 \

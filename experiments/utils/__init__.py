@@ -1,6 +1,7 @@
 import os
 import yaml
 import torch
+import logging
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -177,9 +178,33 @@ def visualize_fixed_set(model, images, masks, epoch, batch, save_dir, binarize=T
     model.train()
 
 
-def pad_to_divisible_by_32(images, pad_value=0.0):
-    # Calculate padding to make image height and width divisible by 32. This is required by the UNet model.
-    _, _, height, width = images.shape
+# def pad_to_divisible_by_32(images, pad_value=0.0):
+#     # Calculate padding to make image height and width divisible by 32. This is required by the UNet model.
+#     _, _, height, width = images.shape
+#     pad_height = (32 - height % 32) % 32
+#     pad_width = (32 - width % 32) % 32
+#
+#     padding_top = pad_height // 2
+#     padding_bottom = pad_height - padding_top
+#     padding_left = pad_width // 2
+#     padding_right = pad_width - padding_left
+#
+#     # Pad images
+#     padded_images = nn.functional.pad(images, (padding_left, padding_right, padding_top, padding_bottom),
+#                                       mode='constant', value=pad_value)
+#     return padded_images
+
+
+def pad_to_divisible_by_32(image, pad_value=0.0):
+    # Ensure the input is a tensor
+    if not isinstance(image, torch.Tensor):
+        image = torch.tensor(image)
+
+    # Ensure the input is a 3D tensor (channels, height, width)
+    if image.dim() != 3:
+        raise ValueError("Input image must be a 3D tensor (channels, height, width)")
+
+    _, height, width = image.shape
     pad_height = (32 - height % 32) % 32
     pad_width = (32 - width % 32) % 32
 
@@ -188,10 +213,11 @@ def pad_to_divisible_by_32(images, pad_value=0.0):
     padding_left = pad_width // 2
     padding_right = pad_width - padding_left
 
-    # Pad images
-    padded_images = nn.functional.pad(images, (padding_left, padding_right, padding_top, padding_bottom),
-                                      mode='constant', value=pad_value)
-    return padded_images
+    # Pad image
+    padded_image = nn.functional.pad(image, (padding_left, padding_right, padding_top, padding_bottom),
+                                     mode='constant', value=pad_value)
+
+    return padded_image
 
 
 def get_model(model_name, in_channels=1, n_classes=1):
@@ -244,29 +270,25 @@ def test_all(loader, model, loss_fn):
     model.eval()
     test_loss = 0
     with torch.no_grad():
-        for batch, (images, masks, free_fluid_labels, _) in enumerate(loader):
-            # Pad the images and masks to make them divisible by 32
-            images = pad_to_divisible_by_32(images, pad_value=-1.0)
-            masks = pad_to_divisible_by_32(masks, pad_value=0.0)
+        for batch, (images, masks, _) in enumerate(loader):
 
             images, masks = images.cuda(), masks.cuda()
             pred = model(images)
-            pred = torch.sigmoid(pred)
             test_loss += loss_fn(pred, masks).item()
     test_loss /= num_batches
 
     return test_loss
 
+out_dir = '/accounts/campus/austin.zane/ucsf_fast/out'
+
+# Configure logging
+logging.basicConfig(filename=os.path.join(out_dir, 'output.log'), level=logging.ERROR)
 
 def evaluate_and_save_outputs(model, data_loader, output_dir, device, binarize=False, cutoff=0.5):
-    # FUNCTION NOT READY. Needs to keep track of filenames and save them in the output_dir
-    # This is pretty much raw AI output and has not been checked.
-
     model.eval()
     os.makedirs(output_dir, exist_ok=True)
     with torch.no_grad():
-        for images, masks, free_fluid_labels, image_files in data_loader:
-            images = pad_to_divisible_by_32(images, pad_value=-1.0)
+        for images, masks, image_files in data_loader:
             images = images.to(device)
             pred_masks = model(images)
             pred_masks = torch.sigmoid(pred_masks)
@@ -274,12 +296,10 @@ def evaluate_and_save_outputs(model, data_loader, output_dir, device, binarize=F
                 pred_masks = (pred_masks > cutoff).float()
             for j in range(len(images)):
                 image_file = image_files[j]
-                output_name = image_file.split('.jpg')[0] + '_Mask_Pred.jpg'
-                # output_prefix = os.path.splitext(os.path.basename(image_file))[0]
-                # image = images[j].cpu().numpy().squeeze()
-                # true_mask = masks[j].cpu().numpy().squeeze()
-                pred_mask = pred_masks[j].cpu().numpy().squeeze()
-                plt.imsave(os.path.join(output_dir, output_name), pred_mask, cmap='gray')
-                # np.save(os.path.join(output_dir, f'{output_prefix}_image.npy'), image)
-                # np.save(os.path.join(output_dir, f'{output_prefix}_true_mask.npy'), true_mask)
-                # np.save(os.path.join(output_dir, f'{output_prefix}_pred_mask.npy'), pred_mask)
+                output_name = image_file.replace('.pt', '_Mask_Pred.pt')
+                pred_mask = pred_masks[j]
+
+                try:
+                    torch.save(pred_mask, os.path.join(output_dir, output_name))
+                except Exception as e:
+                    logging.error(f'Error saving output for {image_file}: {e}')
