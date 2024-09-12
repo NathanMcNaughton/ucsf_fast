@@ -20,8 +20,8 @@ import sys
 
 from experiments.utils import load_config, DICELoss
 from common.datasets import FASTSegmentationDataset
-from experiments.utils import get_optimizer, get_model, test_all, evaluate_and_save_outputs
-from experiments.utils import visualize_segmentation_overlay, visualize_fixed_set, pad_to_divisible_by_32
+from experiments.utils import get_optimizer, get_model, test_all, evaluate_and_save_seg_outputs
+from experiments.utils import visualize_segmentation_overlay, visualize_fixed_set
 
 from common.logging import VanillaLogger
 from common import print_error
@@ -29,8 +29,6 @@ from common import print_error
 
 parser = argparse.ArgumentParser(description='Training Segmentation Model')
 parser.add_argument('--proj', default='unet_test', type=str, help='project name')
-parser.add_argument('--n_total', default=2000, type=int, help='num. of total images')
-parser.add_argument('--n_train', default=350, type=int, help='num. of training images')
 parser.add_argument('--batch_size', default=10, type=int)
 parser.add_argument('--k', default=1, type=int, help="log every k epochs")
 parser.add_argument('--binarize', default=False, action='store_true', help='Force output to be binary')
@@ -148,9 +146,23 @@ def main():
 
             images, masks = images.cuda(), masks.cuda()
 
+            if epoch == 0 and batch == 0:
+                print(f'Image shape: {images.shape}')
+                print(f'Mask shape: {masks.shape}')
+
             # Compute prediction error
+            print('Feeding batch to model...')
             pred = model(images)
+            print('Computing loss...')
             loss = criterion(pred, masks)
+
+            if epoch == 0 and batch == 0:
+                print(f'Prediction shape: {pred.shape}')
+
+            ###################
+            print('Returning early...')
+            return 0
+            ###################
 
             # Backpropagation
             loss.backward()
@@ -189,13 +201,13 @@ def main():
     if args.output_saving:
         print('Evaluating on training set and saving outputs...')
         train_output_dir = os.path.join(output_dir, 'train')
-        evaluate_and_save_outputs(model, loader_train, train_output_dir,
-                                  binarize=args.binarize, cutoff=args.cutoff, device='cuda')
+        evaluate_and_save_seg_outputs(model, loader_train, train_output_dir,
+                                      binarize=args.binarize, cutoff=args.cutoff, device='cuda')
 
         print('Evaluating on val set and saving outputs...')
         val_output_dir = os.path.join(output_dir, 'val')
-        evaluate_and_save_outputs(model, loader_val, val_output_dir,
-                                  binarize=args.binarize, cutoff=args.cutoff, device='cuda')
+        evaluate_and_save_seg_outputs(model, loader_val, val_output_dir,
+                                      binarize=args.binarize, cutoff=args.cutoff, device='cuda')
 
     print('Exiting...')
 

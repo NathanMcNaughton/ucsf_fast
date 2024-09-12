@@ -7,7 +7,8 @@ import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 from common.models.small.unet_toy import ToyUNet
-from common.models.large.pretrained_backbone_unet import get_pretrained_backbone_unet
+from common.models.small.pretrained_backbone_unet import get_pretrained_backbone_unet
+from common.models.small.preresnet import preresnet18, preresnet34, preresnet50, preresnet101, preresnet152
 
 
 def load_config():
@@ -225,7 +226,7 @@ def get_model(model_name, in_channels=1, n_classes=1):
     Get the model by name.
     Parameters:
         model_name: The name of the model.
-        n_channels: The number of input channels.
+        in_channels: The number of input channels.
         n_classes: The number of output classes.
     Returns:
         model: The model.
@@ -234,6 +235,16 @@ def get_model(model_name, in_channels=1, n_classes=1):
         model = ToyUNet(n_channels=in_channels, n_classes=n_classes)
     elif model_name == 'pretrained_unet':
         model = get_pretrained_backbone_unet(backbone_name='resnet18', in_channels=in_channels, n_classes=n_classes)
+    elif model_name == 'preresnet18':
+        model = preresnet18(in_channels=in_channels, num_classes=n_classes)
+    elif model_name == 'preresnet34':
+        model = preresnet34(in_channels=in_channels, num_classes=n_classes)
+    elif model_name == 'preresnet50':
+        model = preresnet50(in_channels=in_channels, num_classes=n_classes)
+    elif model_name == 'preresnet101':
+        model = preresnet101(in_channels=in_channels, num_classes=n_classes)
+    elif model_name == 'preresnet152':
+        model = preresnet152(in_channels=in_channels, num_classes=n_classes)
     else:
         raise ValueError(f'Invalid model name: {model_name}')
     return model
@@ -284,7 +295,35 @@ out_dir = '/accounts/campus/austin.zane/ucsf_fast/out'
 # Configure logging
 logging.basicConfig(filename=os.path.join(out_dir, 'output.log'), level=logging.ERROR)
 
-def evaluate_and_save_outputs(model, data_loader, output_dir, device, binarize=False, cutoff=0.5):
+
+def test_all_classification(loader, model, loss_fn):
+    num_batches = len(loader)
+    model.eval()
+    test_loss = 0.0
+    test_acc = 0.0
+    num_pos_pred = 0
+
+    with torch.no_grad():
+        for batch, (images, labels) in enumerate(loader):
+            labels = labels.unsqueeze(1).float()
+            images, labels = images.cuda(), labels.cuda()
+            pred = model(images)
+            test_loss += loss_fn(pred, labels).item()
+
+            pred = torch.sigmoid(pred)
+            # test_acc += (pred.argmax(1) == labels).float().mean().item()
+            test_acc += ((pred > 0.5).float() == labels).float().mean().item()
+            num_pos_pred += (pred > 0.5).float().sum().item()
+
+    test_loss /= num_batches
+    test_acc /= num_batches
+
+    ratio_pos_pred = num_pos_pred / (len(loader) * loader.batch_size)
+
+    return test_loss, test_acc, ratio_pos_pred
+
+
+def evaluate_and_save_seg_outputs(model, data_loader, output_dir, device, binarize=False, cutoff=0.5):
     model.eval()
     os.makedirs(output_dir, exist_ok=True)
     with torch.no_grad():
@@ -299,7 +338,38 @@ def evaluate_and_save_outputs(model, data_loader, output_dir, device, binarize=F
                 output_name = image_file.replace('.pt', '_Mask_Pred.pt')
                 pred_mask = pred_masks[j]
 
+                # pred_mask = pred_mask.cpu()
+
                 try:
                     torch.save(pred_mask, os.path.join(output_dir, output_name))
                 except Exception as e:
                     logging.error(f'Error saving output for {image_file}: {e}')
+
+
+def evaluate_and_save_class_outputs(model, data_loader, output_dir, device, cutoff=0.5):
+    model.eval()
+    os.makedirs(output_dir, exist_ok=True)
+    all_label_pairs = []
+
+    with torch.no_grad():
+        for images, labels in data_loader:
+            images = images.to(device)
+            pred_labels = model(images)
+            pred_labels = torch.sigmoid(pred_labels)
+            #pred_labels = (pred_labels > cutoff).float()
+
+            pred_labels = pred_labels.cpu().numpy()
+            labels = labels.cpu().numpy()
+
+            # print(f'Pred labels type: {type(pred_labels)}')
+            # print(f'Labels type: {type(labels)}')
+
+            label_pairs = np.column_stack((pred_labels, labels))
+            all_label_pairs.append(label_pairs)
+
+            # print(f'All label pairs type: {type(all_label_pairs)}')
+
+    all_label_pairs = np.concatenate(all_label_pairs, axis=0)
+
+    # Save the label pairs in numpy format
+    np.save(os.path.join(output_dir, 'pred_and_true_labels.npy'), all_label_pairs)

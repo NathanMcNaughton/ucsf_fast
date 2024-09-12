@@ -28,84 +28,21 @@ class TransformingTensorDataset(Dataset):
     def __len__(self):
         return len(self.X)
     
-    
-# class FASTDataset(Dataset):
-#     """
-#     This dataset is designed to work with the pilot labeling done in February 2024.
-#     The images and the segmentation labels are saved as PNG images in the same
-#     directory. There are 384 such pairs.
-#
-#     This class defaults to resizing the images when they have irregular dimensions.
-#     If the option is turned off and this class is used with torch.utils.data.DataLoader,
-#     there will likely be errors when PyTorch tries to stack the images in a batch.
-#
-#     Attributes:
-#         data_dir (str): Directory with image files.
-#         resize (bool): Flag to resize images to a standard size if they don't match.
-#         transform (torchvision.transforms): Transformations to be applied to the images and the masks.
-#     """
-#     DEFAULT_IMAGE_SIZE = (960, 720)
-#
-#     def __init__(self, data_dir: str, resize: bool = True, transform = None, included_files = None, excluded_files=None):
-#         self.data_dir = data_dir
-#         self.transform = transform
-#         self.resize = resize
-#         # List all files in directory and filter out segmentation label images
-#         if included_files:
-#             self.image_files = [f for f in included_files if not '_Morison' in f and f.endswith('.png') and f in os.listdir(data_dir)]
-#         else:
-#             self.image_files = [f for f in os.listdir(data_dir) if not '_Morison' in f and f.endswith('.png') and f not in excluded_files]
-#
-#     def __len__(self):
-#         return len(self.image_files)
-#
-#     def __getitem__(self, index):
-#         img_name = self.image_files[index]
-#         label_name = img_name.rsplit('.', 1)[0] + '_Morison.png'
-#
-#         img_path = os.path.join(self.data_dir, img_name)
-#         label_path = os.path.join(self.data_dir, label_name)
-#
-#         try:
-#             image = Image.open(img_path).convert('L')
-#             label = Image.open(label_path).convert('L')
-#         except IOError as e:
-#             raise RuntimeError(f'Error opening image: {e}')
-#
-#         # Check for images that are not default size
-#         if self.resize and image.size != self.DEFAULT_IMAGE_SIZE:
-#
-#             # For images, use bilinear interpolation
-#             img_resize_transform = transforms.Resize(
-#                 size=(self.DEFAULT_IMAGE_SIZE[1], self.DEFAULT_IMAGE_SIZE[0]),
-#                 interpolation=InterpolationMode.BILINEAR
-#             )
-#             # For labels, use nearest neighbor interpolation to avoid introducing non-binary values
-#             label_resize_transform = transforms.Resize(
-#                 size=(self.DEFAULT_IMAGE_SIZE[1], self.DEFAULT_IMAGE_SIZE[0]),
-#                 interpolation=InterpolationMode.NEAREST
-#             )
-#             image = img_resize_transform(image)
-#             label = label_resize_transform(label)
-#
-#         # Define transformations for the images. Namely, convert to tensor and normalize.
-#         img_transform = transforms.Compose([
-#             transforms.ToTensor(),
-#             transforms.Normalize(mean=[0.5], std=[0.5])
-#         ])
-#         # Define transformations for the labels. Namely, convert to tensor.
-#         label_transform = transforms.Compose([
-#             transforms.ToTensor()
-#         ])
-#
-#         image = img_transform(image)
-#         label = label_transform(label)
-#
-#         if self.transform:
-#             image = self.transform(image)
-#             label = self.transform(label)
-#
-#         return image, label
+
+def censor_image(image, mask):
+    # Ensure the image and mask have the same shape
+    assert image.shape == mask.shape, "Image and mask must have the same shape"
+
+    # Ensure that mask tensor is binary
+    assert torch.all((mask == 0) | (mask == 1)), "Mask tensor must be binary"
+
+    # Create a tensor filled with -1, having the same shape as the image
+    censor_value = torch.full_like(image, fill_value=-1)
+
+    # Use the mask to select the pixels to be censored
+    censored_image = torch.where(mask == 0, censor_value, image)
+
+    return censored_image
 
 
 class FASTSegmentationDataset(Dataset):
@@ -120,6 +57,8 @@ class FASTSegmentationDataset(Dataset):
         The dataset assumes that the images and masks are stored in separate subdirectories within the specified data
         directory. The image files are expected to have a '.pt' extension, while the mask files should have
         a '_Mask.pt' suffix.
+
+        Using additional transforms is not recommended with the current version.
 
         Args:
             data_dir (str): The root directory containing the image and mask subdirectories.
@@ -160,7 +99,7 @@ class FASTSegmentationDataset(Dataset):
             image = torch.load(image_path)
             mask = torch.load(mask_path)
         except IOError as e:
-            raise RuntimeError(f'Error opening image: {e}')
+            raise RuntimeError(f'Error opening image or mask: {e}')
 
         if self.transform:
             image = self.transform(image)
@@ -169,6 +108,58 @@ class FASTSegmentationDataset(Dataset):
         return image, mask, image_name
 
 
-# class FASTClassificationDataset(Dataset):
+class FASTClassificationDataset(Dataset):
+    def __init__(self, data_dir: str, split: str = 'train', pred_mask_dir: str = None,
+                 use_mask: bool = True, use_pred_mask: bool = True):
+        self.data_dir = data_dir
+        self.split_data_dir = os.path.join(data_dir, split)
+        self.pred_mask_dir = os.path.join(pred_mask_dir, split)
+        self.use_mask = use_mask
+        self.use_pred_mask = use_pred_mask
+
+        self.image_files = os.listdir(os.path.join(self.split_data_dir, 'images'))
+        # csv_path = os.path.join(data_dir, 'free_fluid_labels.csv')
+        # self.image_metadata = pd.read_csv(csv_path)
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, index):
+        image_name = self.image_files[index]
+        image_path = os.path.join(self.split_data_dir, 'images', image_name)
+
+        csv_path = os.path.join(self.data_dir, 'free_fluid_labels.csv')
+        image_metadata = pd.read_csv(csv_path)
+
+        try:
+            image = torch.load(image_path, map_location=torch.device('cpu'))
+        except IOError as e:
+            raise RuntimeError(f'Error opening image: {e}')
+
+        image_name_jpg = image_name.replace('.pt', '.jpg')
+        metadata = image_metadata[image_metadata['filename'] == image_name_jpg]
+        free_fluid_label = metadata['free_fluid_label'].values[0]
+
+        if not self.use_mask:
+            return image, free_fluid_label
+
+        if self.use_pred_mask:
+            mask_name = image_name.replace('.pt', '_Mask_Pred.pt')
+            mask_path = os.path.join(self.pred_mask_dir, mask_name)
+        else:
+            mask_name = image_name.replace('.pt', '_Mask.pt')
+            mask_path = os.path.join(self.split_data_dir, 'masks', mask_name)
+
+        try:
+            mask = torch.load(mask_path, map_location=torch.device('cpu'))
+        except IOError as e:
+            raise RuntimeError(f'Error opening mask: {e}')
+
+        censored_image = censor_image(image, mask)
+
+        free_fluid_label = 0 if free_fluid_label == -1 else 1
+
+        return censored_image, free_fluid_label
+
 
 

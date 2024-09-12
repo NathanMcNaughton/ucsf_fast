@@ -3,6 +3,7 @@ wandb_api_key: 'YOUR_WANDB_API_KEY'
 scf_root: 'YOUR_PROJECT_ROOT'
 data_dir: 'YOUR_DATA_DIR'
 output_dir: 'YOUR_OUTPUT_DIR'
+class_output_dir: 'YOUR_CLASS_OUTPUT_DIR'
 logging_dir: 'YOUR_LOGGING_DIR'
 
 # mdai_args

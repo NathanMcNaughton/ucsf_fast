@@ -15,12 +15,15 @@ cd /accounts/campus/austin.zane/ucsf_fast
 
 python \
     -m experiments.train_segmentation \
-    --proj unet_test_05_17_24 \
+    --proj unet_test_05_18_24 \
     --k 5 \
-    --output_saving \
-    --n_epochs 200 \
+    --n_epochs 100 \
     --batch_size 10 \
     --loss_weight 10 \
     --learning_rate 0.0003 \
+    --binarize \
+    --cutoff 0.5 \
+    --output_saving \
+
 
 
