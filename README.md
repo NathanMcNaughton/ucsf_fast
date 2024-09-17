@@ -25,14 +25,15 @@ This is a codebase for the UCSF FAST project.The following is a brief overview o
 ## Usage
 
 To use the codebase, follow these steps:
-1. Clone the repository.
-2. Install the required packages using config.yaml: `pip install -r config.yaml`.
+1. Clone this repository and update paths in `config.yaml` to point to the appropriate directories.
+2. Install the required packages using environment.yaml: `conda env create -f environment.yml`.
 3. Download the data from the Kornblith Lab folder on UCSF Research Analysis Environment (RAE). In particular, download
 the directories:
     - `M:\TempAnnotations_Morison\DCMFRM\DCMFRM`
     - `M:\Positive_13_15\P1315_Images`
     - `M:\Positive_13_15\InstanceRecord.csv`
-and update the `mdai_args` dictionary in `experiments/accessing_mdai_data.py` with the appropriate paths.
-4. Run the `experiments/accessing_mdai_data.py` script to fetch the annotations from MDai and generate the necessary data files.
-5. ...
-6. Profit.
+
+    and update the global variables `IMAGE_DIR`, `RUQ_DIR`, and `P1315_DIR`  in `config.yaml` with the appropriate paths.
+4. Execute the `experiments/accessing_mdai_data.py` script to fetch the annotations from MDai and generate the necessary data files.
+5. Submit the `scripts/run_train_unet.sh` shell script using `sbatch`.
+6. Submit the `scripts/run_train_resnet.sh` shell script `sbatch`.
