@@ -462,4 +462,3 @@ dependencies:
       - tifffile==2024.2.12
       - timm==0.9.2
       - wand==0.6.13
-prefix: /scratch/users/austin.zane/conda/envs/ucsf_env
